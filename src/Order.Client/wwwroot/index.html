@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Order Client</title>
+  <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@10.0.0/dist/browser/signalr.min.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 900px; padding: 0 1rem; color: #172033; }
+    form, .panel { border: 1px solid #d5dbea; border-radius: 8px; margin: 1rem 0; padding: 1rem; }
+    label { display: block; margin: .6rem 0; }
+    input { box-sizing: border-box; max-width: 100%; padding: .5rem; }
+    button { cursor: pointer; padding: .5rem .8rem; }
+    .status { color: #42526e; min-height: 1.5rem; }
+    .error { color: #b42318; }
+    .order { border-top: 1px solid #e5e9f2; padding: .8rem 0; }
+    .notification { padding: .4rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Theo dõi đơn hàng</h1>
+  <p id="connection" class="status">Đang kết nối dịch vụ...</p>
+
+  <section class="panel">
+    <h2>Tạo đơn hàng</h2>
+    <form id="order-form">
+      <label>Tên khách hàng
+        <input name="customerName" required maxlength="200">
+      </label>
+      <label>Sản phẩm
+        <input name="productName" required maxlength="200">
+      </label>
+      <label>Số lượng
+        <input name="quantity" type="number" min="1" value="1" required>
+      </label>
+      <label>Đơn giá
+        <input name="unitPrice" type="number" min="0" step="0.01" value="0" required>
+      </label>
+      <button type="submit">Tạo đơn</button>
+      <p id="form-message" class="status" role="status"></p>
+    </form>
+  </section>
+
+  <section class="panel">
+    <h2>Đơn hàng</h2>
+    <button id="refresh" type="button">Làm mới</button>
+    <div id="orders" aria-live="polite"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Thông báo trạng thái</h2>
+    <div id="notifications" aria-live="polite"></div>
+  </section>
+
+  <script>
+    const ordersElement = document.getElementById("orders");
+    const notificationsElement = document.getElementById("notifications");
+    const formMessage = document.getElementById("form-message");
+    const connectionMessage = document.getElementById("connection");
+    let config;
+    let hub;
+
+    function showError(element, error) {
+      element.textContent = error.message || String(error);
+      element.classList.add("error");
+    }
+
+    function renderOrders(orders) {
+      ordersElement.replaceChildren();
+      if (orders.length === 0) {
+        ordersElement.textContent = "Chưa có đơn hàng.";
+        return;
+      }
+
+      for (const order of orders) {
+        const row = document.createElement("article");
+        row.className = "order";
+        const title = document.createElement("strong");
+        title.textContent = `${order.customerName} — ${order.status}`;
+        const details = document.createElement("p");
+        details.textContent = `Mã: ${order.id} | Tổng: ${order.totalAmount}`;
+        row.append(title, details);
+        ordersElement.append(row);
+      }
+    }
+
+    async function trackOrders(orders) {
+      if (!hub || hub.state !== signalR.HubConnectionState.Connected) return;
+      for (const order of orders) {
+        await hub.invoke("TrackOrder", order.id);
+      }
+    }
+
+    async function loadOrders() {
+      const response = await fetch(`${config.orderApiUrl}/orders`);
+      if (!response.ok) throw new Error(`Không tải được đơn hàng (HTTP ${response.status}).`);
+      const orders = await response.json();
+      renderOrders(orders);
+      await trackOrders(orders);
+    }
+
+    async function start() {
+      config = await fetch("/config").then(async response => {
+        if (!response.ok) throw new Error("Không tải được cấu hình client.");
+        return response.json();
+      });
+
+      hub = new signalR.HubConnectionBuilder()
+        .withUrl(config.notificationHubUrl)
+        .withAutomaticReconnect()
+        .build();
+
+      hub.on("ReceiveOrderNotification", event => {
+        const entry = document.createElement("p");
+        entry.className = "notification";
+        entry.textContent = `${event.customerName}: ${event.oldStatus} → ${event.newStatus} — ${event.message}`;
+        notificationsElement.prepend(entry);
+      });
+
+      hub.onreconnected(async () => {
+        connectionMessage.textContent = "Đã kết nối nhận thông báo.";
+        try {
+          await loadOrders();
+        } catch (error) {
+          showError(connectionMessage, error);
+        }
+      });
+
+      try {
+        await hub.start();
+        connectionMessage.textContent = "Đã kết nối nhận thông báo.";
+      } catch (error) {
+        showError(connectionMessage, error);
+      }
+
+      await loadOrders();
+    }
+
+    document.getElementById("order-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const orderForm = event.currentTarget;
+      formMessage.classList.remove("error");
+      formMessage.textContent = "Đang tạo đơn...";
+      const form = new FormData(orderForm);
+      const payload = {
+        customerName: form.get("customerName"),
+        items: [{
+          productName: form.get("productName"),
+          quantity: Number(form.get("quantity")),
+          unitPrice: Number(form.get("unitPrice"))
+        }]
+      };
+
+      try {
+        const response = await fetch(`${config.orderApiUrl}/orders`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.detail || result.message || `Tạo đơn thất bại (HTTP ${response.status}).`);
+        }
+
+        formMessage.textContent = `Đã tạo đơn ${result.id}.`;
+        orderForm.reset();
+        if (hub.state === signalR.HubConnectionState.Connected) {
+          await hub.invoke("TrackOrder", result.id);
+        }
+        await loadOrders();
+      } catch (error) {
+        showError(formMessage, error);
+      }
+    });
+
+    document.getElementById("refresh").addEventListener("click", async () => {
+      try {
+        await loadOrders();
+      } catch (error) {
+        showError(connectionMessage, error);
+      }
+    });
+
+    start().catch(error => showError(connectionMessage, error));
+  </script>
+</body>
+</html>

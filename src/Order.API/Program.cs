@@ -10,6 +10,15 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDbContext<OrderDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+        policy.WithOrigins(allowedOrigins)
+            .AllowAnyHeader()
+            .AllowAnyMethod());
+});
+
 builder.Services.AddSingleton<RabbitMqPublisher>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -23,6 +32,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseCors();
+
 // Auto-migrate database on startup for convenience
 using (var scope = app.Services.CreateScope())
 {
@@ -33,12 +44,32 @@ using (var scope = app.Services.CreateScope())
 // Endpoint 1: POST /orders - Tạo đơn hàng mới
 app.MapPost("/orders", async (CreateOrderRequest request, OrderDbContext db, RabbitMqPublisher publisher, ILogger<Program> logger) =>
 {
-    if (string.IsNullOrWhiteSpace(request.CustomerName) || request.Items == null || !request.Items.Any())
+    if (string.IsNullOrWhiteSpace(request.CustomerName) || request.Items is null || request.Items.Count == 0)
     {
         return Results.BadRequest(new { message = "Invalid order data. Customer name and items are required." });
     }
 
-    var totalAmount = request.Items.Sum(i => i.Quantity * i.UnitPrice);
+    if (request.Items.Any(item =>
+            item is null ||
+            string.IsNullOrWhiteSpace(item.ProductName) ||
+            item.Quantity <= 0 ||
+            item.UnitPrice < 0))
+    {
+        return Results.BadRequest(new
+        {
+            message = "Each item must have a product name, a positive quantity, and a non-negative unit price."
+        });
+    }
+
+    decimal totalAmount;
+    try
+    {
+        totalAmount = request.Items.Sum(item => item.Quantity * item.UnitPrice);
+    }
+    catch (OverflowException)
+    {
+        return Results.BadRequest(new { message = "The order total is too large." });
+    }
 
     var orderEntity = new OrderEntity
     {
@@ -48,7 +79,7 @@ app.MapPost("/orders", async (CreateOrderRequest request, OrderDbContext db, Rab
         CreatedAt = DateTime.UtcNow,
         Items = request.Items.Select(i => new OrderItemEntity
         {
-            ProductName = i.ProductName,
+            ProductName = i.ProductName.Trim(),
             Quantity = i.Quantity,
             UnitPrice = i.UnitPrice
         }).ToList()
@@ -74,7 +105,11 @@ app.MapPost("/orders", async (CreateOrderRequest request, OrderDbContext db, Rab
     catch (Exception ex)
     {
         logger.LogError(ex, "Failed to publish OrderCreatedEvent for Order ID: {OrderId}", orderEntity.Id);
-        // Vẫn trả về thành công vì đơn đã lưu DB, có thể retry sau hoặc xử lý bù
+        return Results.Problem(
+            title: "Order was saved but could not be queued for processing.",
+            detail: $"The order remains pending. Retry or inspect order {orderEntity.Id}.",
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            extensions: new Dictionary<string, object?> { ["orderId"] = orderEntity.Id });
     }
 
     var response = new OrderResponse
