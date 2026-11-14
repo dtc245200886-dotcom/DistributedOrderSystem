@@ -1,0 +1,128 @@
+
+
+services:
+  # 1. PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: order_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-order_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - order-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-order_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 2. RabbitMQ Message Broker
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: order_rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-orderapp}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-orderapp_dev_password}
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    networks:
+      - order-net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 3. Order API
+  order-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: order_api
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-order_db};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}"
+      RabbitMQ__HostName: rabbitmq
+      RabbitMQ__UserName: ${RABBITMQ_USER:-orderapp}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD:-orderapp_dev_password}
+      Cors__AllowedOrigins__0: "http://localhost:${ORDER_CLIENT_PORT:-5003}"
+      Cors__AllowedOrigins__1: http://localhost:5008
+      ASPNETCORE_URLS: http://+:8080
+    ports:
+      - "${ORDER_API_PORT:-5000}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - order-net
+
+  # 4. Order Worker
+  order-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: order_worker
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-order_db};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}"
+      RabbitMQ__HostName: rabbitmq
+      RabbitMQ__UserName: ${RABBITMQ_USER:-orderapp}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD:-orderapp_dev_password}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - order-net
+
+  # 5. Notification Service
+  notification-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.notification
+    container_name: notification_service
+    environment:
+      RabbitMQ__HostName: rabbitmq
+      RabbitMQ__UserName: ${RABBITMQ_USER:-orderapp}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD:-orderapp_dev_password}
+      Cors__AllowedOrigins__0: "http://localhost:${ORDER_CLIENT_PORT:-5003}"
+      Cors__AllowedOrigins__1: http://localhost:5008
+      ASPNETCORE_URLS: http://+:8080
+    ports:
+      - "${NOTIFICATION_PORT:-5002}:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - order-net
+
+  # 6. Order Client Web App
+  order-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    container_name: order_client
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      Services__OrderApiUrl: "http://localhost:${ORDER_API_PORT:-5000}"
+      Services__NotificationHubUrl: "http://localhost:${NOTIFICATION_PORT:-5002}/orderHub"
+    ports:
+      - "${ORDER_CLIENT_PORT:-5003}:8080"
+    depends_on:
+      - order-api
+    networks:
+      - order-net
+
+volumes:
+  pgdata:
+
+networks:
+  order-net:
+    driver: bridge

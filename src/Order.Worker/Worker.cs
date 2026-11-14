@@ -3,7 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using Order.API.Data;
+using Order.Persistence.Data;
 using OrderSystem.Shared;
 
 namespace Order.Worker;

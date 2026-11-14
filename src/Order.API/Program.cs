@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Order.API.Data;
-using Order.API.Models;
 using Order.API.Services;
+using Order.Persistence.Data;
+using Order.Persistence.Models;
 using OrderSystem.Shared;
 
 var builder = WebApplication.CreateBuilder(args);

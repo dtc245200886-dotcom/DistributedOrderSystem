@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Order.API.Models;
+using Order.Persistence.Models;
 
-namespace Order.API.Data;
+namespace Order.Persistence.Data;
 
 public class OrderDbContext : DbContext
 {

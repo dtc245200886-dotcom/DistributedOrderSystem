@@ -1,4 +1,4 @@
-namespace Order.API.Models;
+namespace Order.Persistence.Models;
 
 public class OrderEntity
 {

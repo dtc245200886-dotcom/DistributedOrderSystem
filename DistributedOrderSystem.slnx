@@ -4,6 +4,7 @@
     <Project Path="src/Order.API/Order.API.csproj" />
     <Project Path="src/Order.Client/Order.Client.csproj" />
     <Project Path="src/Order.Worker/Order.Worker.csproj" />
+    <Project Path="src/Order.Persistence/Order.Persistence.csproj" />
     <Project Path="src/OrderSystem.Shared/OrderSystem.Shared.csproj" />
   </Folder>
 </Solution>

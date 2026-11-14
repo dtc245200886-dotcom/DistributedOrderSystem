@@ -10,10 +10,11 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageReference Include="RabbitMQ.Client" Version="7.2.2" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\OrderSystem.Shared\OrderSystem.Shared.csproj" />
-    <ProjectReference Include="..\Order.API\Order.API.csproj" />
+    <ProjectReference Include="..\Order.Persistence\Order.Persistence.csproj" />
   </ItemGroup>
 </Project>

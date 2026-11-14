@@ -1,5 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using Order.API.Data;
+using Order.Persistence.Data;
 using Order.Worker;
 
 var builder = Host.CreateApplicationBuilder(args);

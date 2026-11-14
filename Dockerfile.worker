@@ -1,0 +1,16 @@
+FROM mcr.microsoft.com/dotnet/runtime:10.0 AS base
+WORKDIR /app
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+COPY src/Order.Worker/Order.Worker.csproj src/Order.Worker/
+COPY src/Order.Persistence/Order.Persistence.csproj src/Order.Persistence/
+COPY src/OrderSystem.Shared/OrderSystem.Shared.csproj src/OrderSystem.Shared/
+RUN dotnet restore src/Order.Worker/Order.Worker.csproj
+COPY src/ src/
+RUN dotnet publish src/Order.Worker/Order.Worker.csproj -c Release -o /app/publish /p:UseAppHost=false
+
+FROM base AS final
+WORKDIR /app
+COPY --from=build /app/publish .
+ENTRYPOINT ["dotnet", "Order.Worker.dll"]
