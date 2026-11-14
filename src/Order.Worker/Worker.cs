@@ -102,25 +102,45 @@ public class Worker : BackgroundService
                     var messageJson = Encoding.UTF8.GetString(body);
                     var orderEvent = JsonSerializer.Deserialize<OrderCreatedEvent>(messageJson);
 
-                    if (orderEvent != null)
+                    if (orderEvent is null || orderEvent.OrderId == Guid.Empty)
                     {
-                        _logger.LogInformation("Received OrderCreatedEvent for OrderId: {OrderId}", orderEvent.OrderId);
-
-                        // Xử lý đơn hàng bất đồng bộ và cập nhật Database qua Entity Framework Core
-                        await ProcessOrderAsync(orderEvent, channel, stoppingToken);
+                        _logger.LogWarning("Received an invalid OrderCreatedEvent message; discarding it.");
+                        await channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: false);
+                        return;
                     }
+
+                    _logger.LogInformation("Received OrderCreatedEvent for OrderId: {OrderId}", orderEvent.OrderId);
+                    await ProcessOrderAsync(orderEvent, channel, stoppingToken);
 
                     // Xác nhận đã xử lý xong message (Acknowledge)
                     await channel.BasicAckAsync(ea.DeliveryTag, multiple: false);
                 }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    _logger.LogInformation("Stopping order processing; the unacknowledged message will be requeued.");
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogError(ex, "Invalid OrderCreatedEvent JSON; discarding message.");
+                    await channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: false);
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error processing message from queue.");
-                    // Từ chối message và đưa lại hàng đợi nếu lỗi tạm thời
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
                     await channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: true);
                 }
             };
 
+            await channel.BasicQosAsync(prefetchSize: 0, prefetchCount: 1, global: false, cancellationToken: stoppingToken);
             await channel.BasicConsumeAsync(
                 queue: RabbitMqConstants.OrderCreatedQueue,
                 autoAck: false,
@@ -146,27 +166,77 @@ public class Worker : BackgroundService
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<OrderDbContext>();
 
-        var order = await dbContext.Orders.FindAsync(new object[] { orderEvent.OrderId }, stoppingToken);
+        var order = await dbContext.Orders
+            .Include(candidate => candidate.Items)
+            .FirstOrDefaultAsync(candidate => candidate.Id == orderEvent.OrderId, stoppingToken);
         if (order == null)
         {
             _logger.LogWarning("Order with ID {OrderId} not found in database.", orderEvent.OrderId);
             return;
         }
 
-        // Bước 1: Chuyển sang trạng thái Processing
-        string oldStatus = order.Status;
-        order.Status = OrderStatus.Processing.ToString();
-        order.UpdatedAt = DateTime.UtcNow;
-        await dbContext.SaveChangesAsync(stoppingToken);
+        if (order.Status is nameof(OrderStatus.Completed) or nameof(OrderStatus.Failed))
+        {
+            _logger.LogInformation("Ignoring duplicate event for terminal order {OrderId} in state {Status}.", order.Id, order.Status);
+            return;
+        }
 
-        _logger.LogInformation("Order {OrderId} status changed from {Old} to {New}", order.Id, oldStatus, order.Status);
-        await PublishStatusChangedEventAsync(channel, order.Id, order.CustomerName, oldStatus, order.Status, "Đơn hàng đang được xử lý.");
+        if (string.IsNullOrWhiteSpace(order.CustomerName) ||
+            order.Items.Count == 0 ||
+            order.Items.Any(item =>
+                item is null ||
+                string.IsNullOrWhiteSpace(item.ProductName) ||
+                item.Quantity <= 0 ||
+                item.UnitPrice < 0))
+        {
+            var previousStatus = order.Status;
+            order.Status = OrderStatus.Failed.ToString();
+            order.UpdatedAt = DateTime.UtcNow;
+            await dbContext.SaveChangesAsync(stoppingToken);
+
+            _logger.LogWarning("Order {OrderId} failed validation during processing.", order.Id);
+            await PublishStatusChangedEventAsync(
+                channel,
+                order.Id,
+                order.CustomerName,
+                previousStatus,
+                order.Status,
+                "Đơn hàng không hợp lệ nên không thể xử lý.");
+            return;
+        }
+
+        if (order.Status == nameof(OrderStatus.Pending))
+        {
+            order.Status = OrderStatus.Processing.ToString();
+            order.UpdatedAt = DateTime.UtcNow;
+            await dbContext.SaveChangesAsync(stoppingToken);
+
+            _logger.LogInformation("Order {OrderId} status changed from {Old} to {New}", order.Id, OrderStatus.Pending, order.Status);
+            await PublishStatusChangedEventAsync(channel, order.Id, order.CustomerName, OrderStatus.Pending.ToString(), order.Status, "Đơn hàng đang được xử lý.");
+        }
+        else if (order.Status != nameof(OrderStatus.Processing))
+        {
+            var previousStatus = order.Status;
+            order.Status = OrderStatus.Failed.ToString();
+            order.UpdatedAt = DateTime.UtcNow;
+            await dbContext.SaveChangesAsync(stoppingToken);
+
+            _logger.LogError("Order {OrderId} had unsupported status {OldStatus} and was marked failed.", order.Id, previousStatus);
+            await PublishStatusChangedEventAsync(
+                channel,
+                order.Id,
+                order.CustomerName,
+                previousStatus,
+                order.Status,
+                "Đơn hàng có trạng thái không hợp lệ nên không thể xử lý.");
+            return;
+        }
 
         // Giả lập thời gian xử lý nghiệp vụ (ví dụ: đóng gói, kiểm tra kho...) trong 3 giây
         await Task.Delay(3000, stoppingToken);
 
-        // Bước 2: Chuyển sang Completed (hoặc Failed tùy logic ngẫu nhiên/thực tế)
-        oldStatus = order.Status;
+        // Bước 2: Chuyển sang Completed
+        var oldStatus = order.Status;
         order.Status = OrderStatus.Completed.ToString();
         order.UpdatedAt = DateTime.UtcNow;
         await dbContext.SaveChangesAsync(stoppingToken);
