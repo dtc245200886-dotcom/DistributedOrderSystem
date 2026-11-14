@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using Order.Persistence.Data;
+using Order.Persistence.Models;
 using OrderSystem.Shared;
 
 namespace Order.Worker;
@@ -58,15 +59,6 @@ public class Worker : BackgroundService
                     cancellationToken: stoppingToken
                 );
 
-                await channel.QueueDeclareAsync(
-                    queue: RabbitMqConstants.OrderStatusChangedQueue,
-                    durable: true,
-                    exclusive: false,
-                    autoDelete: false,
-                    arguments: null,
-                    cancellationToken: stoppingToken
-                );
-
                 _logger.LogInformation("Order.Worker connected to RabbitMQ successfully and listening to queue.");
                 break;
             }
@@ -110,7 +102,7 @@ public class Worker : BackgroundService
                     }
 
                     _logger.LogInformation("Received OrderCreatedEvent for OrderId: {OrderId}", orderEvent.OrderId);
-                    await ProcessOrderAsync(orderEvent, channel, stoppingToken);
+                    await ProcessOrderAsync(orderEvent, stoppingToken);
 
                     // Xác nhận đã xử lý xong message (Acknowledge)
                     await channel.BasicAckAsync(ea.DeliveryTag, multiple: false);
@@ -161,7 +153,7 @@ public class Worker : BackgroundService
         }
     }
 
-    private async Task ProcessOrderAsync(OrderCreatedEvent orderEvent, IChannel channel, CancellationToken stoppingToken)
+    private async Task ProcessOrderAsync(OrderCreatedEvent orderEvent, CancellationToken stoppingToken)
     {
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<OrderDbContext>();
@@ -189,46 +181,35 @@ public class Worker : BackgroundService
                 item.Quantity <= 0 ||
                 item.UnitPrice < 0))
         {
-            var previousStatus = order.Status;
-            order.Status = OrderStatus.Failed.ToString();
-            order.UpdatedAt = DateTime.UtcNow;
-            await dbContext.SaveChangesAsync(stoppingToken);
-
+            await ChangeStatusAndEnqueueEventAsync(
+                dbContext,
+                order,
+                OrderStatus.Failed,
+                "Đơn hàng không hợp lệ nên không thể xử lý.",
+                stoppingToken);
             _logger.LogWarning("Order {OrderId} failed validation during processing.", order.Id);
-            await PublishStatusChangedEventAsync(
-                channel,
-                order.Id,
-                order.CustomerName,
-                previousStatus,
-                order.Status,
-                "Đơn hàng không hợp lệ nên không thể xử lý.");
             return;
         }
 
         if (order.Status == nameof(OrderStatus.Pending))
         {
-            order.Status = OrderStatus.Processing.ToString();
-            order.UpdatedAt = DateTime.UtcNow;
-            await dbContext.SaveChangesAsync(stoppingToken);
-
-            _logger.LogInformation("Order {OrderId} status changed from {Old} to {New}", order.Id, OrderStatus.Pending, order.Status);
-            await PublishStatusChangedEventAsync(channel, order.Id, order.CustomerName, OrderStatus.Pending.ToString(), order.Status, "Đơn hàng đang được xử lý.");
+            await ChangeStatusAndEnqueueEventAsync(
+                dbContext,
+                order,
+                OrderStatus.Processing,
+                "Đơn hàng đang được xử lý.",
+                stoppingToken);
         }
         else if (order.Status != nameof(OrderStatus.Processing))
         {
             var previousStatus = order.Status;
-            order.Status = OrderStatus.Failed.ToString();
-            order.UpdatedAt = DateTime.UtcNow;
-            await dbContext.SaveChangesAsync(stoppingToken);
-
+            await ChangeStatusAndEnqueueEventAsync(
+                dbContext,
+                order,
+                OrderStatus.Failed,
+                "Đơn hàng có trạng thái không hợp lệ nên không thể xử lý.",
+                stoppingToken);
             _logger.LogError("Order {OrderId} had unsupported status {OldStatus} and was marked failed.", order.Id, previousStatus);
-            await PublishStatusChangedEventAsync(
-                channel,
-                order.Id,
-                order.CustomerName,
-                previousStatus,
-                order.Status,
-                "Đơn hàng có trạng thái không hợp lệ nên không thể xử lý.");
             return;
         }
 
@@ -236,37 +217,41 @@ public class Worker : BackgroundService
         await Task.Delay(3000, stoppingToken);
 
         // Bước 2: Chuyển sang Completed
-        var oldStatus = order.Status;
-        order.Status = OrderStatus.Completed.ToString();
-        order.UpdatedAt = DateTime.UtcNow;
-        await dbContext.SaveChangesAsync(stoppingToken);
+        await ChangeStatusAndEnqueueEventAsync(
+            dbContext,
+            order,
+            OrderStatus.Completed,
+            "Đơn hàng đã hoàn thành và sẵn sàng giao!",
+            stoppingToken);
 
         _logger.LogInformation("Order {OrderId} successfully completed.", order.Id);
-        await PublishStatusChangedEventAsync(channel, order.Id, order.CustomerName, oldStatus, order.Status, "Đơn hàng đã hoàn thành và sẵn sàng giao!");
     }
 
-    private async Task PublishStatusChangedEventAsync(IChannel channel, Guid orderId, string customerName, string oldStatus, string newStatus, string message)
+    private static async Task ChangeStatusAndEnqueueEventAsync(
+        OrderDbContext dbContext,
+        OrderEntity order,
+        OrderStatus newStatus,
+        string message,
+        CancellationToken stoppingToken)
     {
         var statusEvent = new OrderStatusChangedEvent(
-            orderId,
-            customerName,
-            oldStatus,
-            newStatus,
+            order.Id,
+            order.CustomerName,
+            order.Status,
+            newStatus.ToString(),
             message,
             DateTime.UtcNow
         );
 
-        var json = JsonSerializer.Serialize(statusEvent);
-        var body = Encoding.UTF8.GetBytes(json);
-
-        var props = new BasicProperties { Persistent = true };
-
-        await channel.BasicPublishAsync(
-            exchange: string.Empty,
-            routingKey: RabbitMqConstants.OrderStatusChangedQueue,
-            mandatory: true,
-            basicProperties: props,
-            body: body
-        );
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(stoppingToken);
+        order.Status = newStatus.ToString();
+        order.UpdatedAt = DateTime.UtcNow;
+        dbContext.OutboxMessages.Add(new OutboxMessage
+        {
+            EventType = OrderEventTypes.OrderStatusChanged,
+            Payload = JsonSerializer.Serialize(statusEvent)
+        });
+        await dbContext.SaveChangesAsync(stoppingToken);
+        await transaction.CommitAsync(stoppingToken);
     }
 }

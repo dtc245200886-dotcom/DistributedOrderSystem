@@ -9,6 +9,12 @@ public static class RabbitMqConstants
     public const string OrderStatusChangedQueue = "order.status.changed.queue";
 }
 
+public static class OrderEventTypes
+{
+    public const string OrderCreated = "OrderCreated";
+    public const string OrderStatusChanged = "OrderStatusChanged";
+}
+
 // Message 1: Gửi khi có đơn hàng mới tạo
 public record OrderCreatedEvent(
     Guid OrderId,

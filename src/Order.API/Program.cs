@@ -19,7 +19,7 @@ builder.Services.AddCors(options =>
             .AllowAnyMethod());
 });
 
-builder.Services.AddSingleton<RabbitMqPublisher>();
+builder.Services.AddHostedService<OutboxPublisher>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -34,15 +34,26 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors();
 
-// Auto-migrate database on startup for convenience
+// Ensure the initial schema exists and add the outbox table to existing databases.
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<OrderDbContext>();
     dbContext.Database.EnsureCreated();
+    dbContext.Database.ExecuteSqlRaw("""
+        CREATE TABLE IF NOT EXISTS "OutboxMessages" (
+            "Id" uuid PRIMARY KEY,
+            "EventType" varchar(100) NOT NULL,
+            "Payload" text NOT NULL,
+            "CreatedAt" timestamp with time zone NOT NULL,
+            "PublishedAt" timestamp with time zone NULL
+        );
+        CREATE INDEX IF NOT EXISTS "IX_OutboxMessages_PublishedAt_CreatedAt"
+            ON "OutboxMessages" ("PublishedAt", "CreatedAt");
+        """);
 }
 
 // Endpoint 1: POST /orders - Tạo đơn hàng mới
-app.MapPost("/orders", async (CreateOrderRequest request, OrderDbContext db, RabbitMqPublisher publisher, ILogger<Program> logger) =>
+app.MapPost("/orders", async (CreateOrderRequest request, OrderDbContext db, ILogger<Program> logger) =>
 {
     if (string.IsNullOrWhiteSpace(request.CustomerName) || request.Items is null || request.Items.Count == 0)
     {
@@ -85,12 +96,6 @@ app.MapPost("/orders", async (CreateOrderRequest request, OrderDbContext db, Rab
         }).ToList()
     };
 
-    db.Orders.Add(orderEntity);
-    await db.SaveChangesAsync();
-
-    logger.LogInformation("Order created successfully with ID: {OrderId}", orderEntity.Id);
-
-    // Đẩy message vào RabbitMQ để Worker xử lý bất đồng bộ
     var orderEvent = new OrderCreatedEvent(
         orderEntity.Id,
         orderEntity.CustomerName,
@@ -98,19 +103,19 @@ app.MapPost("/orders", async (CreateOrderRequest request, OrderDbContext db, Rab
         orderEntity.CreatedAt
     );
 
-    try
+    await using (var transaction = await db.Database.BeginTransactionAsync())
     {
-        await publisher.PublishOrderCreatedAsync(orderEvent);
+        db.Orders.Add(orderEntity);
+        db.OutboxMessages.Add(new OutboxMessage
+        {
+            EventType = OrderEventTypes.OrderCreated,
+            Payload = System.Text.Json.JsonSerializer.Serialize(orderEvent)
+        });
+        await db.SaveChangesAsync();
+        await transaction.CommitAsync();
     }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Failed to publish OrderCreatedEvent for Order ID: {OrderId}", orderEntity.Id);
-        return Results.Problem(
-            title: "Order was saved but could not be queued for processing.",
-            detail: $"The order remains pending. Retry or inspect order {orderEntity.Id}.",
-            statusCode: StatusCodes.Status503ServiceUnavailable,
-            extensions: new Dictionary<string, object?> { ["orderId"] = orderEntity.Id });
-    }
+
+    logger.LogInformation("Order created and queued for processing with ID: {OrderId}", orderEntity.Id);
 
     var response = new OrderResponse
     {

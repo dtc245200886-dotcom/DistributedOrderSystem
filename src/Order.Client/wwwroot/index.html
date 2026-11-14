@@ -75,6 +75,7 @@
       for (const order of orders) {
         const row = document.createElement("article");
         row.className = "order";
+        row.dataset.orderId = order.id;
         const title = document.createElement("strong");
         title.textContent = `${order.customerName} — ${order.status}`;
         const details = document.createElement("p");
@@ -111,6 +112,12 @@
         .build();
 
       hub.on("ReceiveOrderNotification", event => {
+        const orderRow = [...ordersElement.querySelectorAll(".order")]
+          .find(row => row.dataset.orderId.toLowerCase() === event.orderId.toLowerCase());
+        if (orderRow) {
+          orderRow.querySelector("strong").textContent = `${event.customerName} — ${event.newStatus}`;
+        }
+
         const entry = document.createElement("p");
         entry.className = "notification";
         entry.textContent = `${event.customerName}: ${event.oldStatus} → ${event.newStatus} — ${event.message}`;

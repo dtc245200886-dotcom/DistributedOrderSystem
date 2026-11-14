@@ -35,9 +35,14 @@ The default Compose credentials are for local development only. Override them wi
 ## Services and request flow
 
 1. The client sends `POST /orders` to Order API.
-2. The API validates the order, stores it as `Pending`, and publishes an `OrderCreatedEvent`.
+2. The API validates the order and stores it as `Pending` together with an outbox event in one database transaction.
 3. Order Worker consumes the event and updates the order through `Processing` to `Completed`, or to `Failed` when the persisted order is invalid.
-4. The Worker publishes status changes. Notification Service forwards them to SignalR clients tracking that order.
+4. The Worker records each status change and its outbox event in one database transaction. The API's outbox publisher sends pending events to durable RabbitMQ queues and retries after broker interruptions.
+5. Notification Service forwards status events to SignalR clients tracking that order. The client updates the order status live.
+
+The outbox makes order creation and status updates recoverable when RabbitMQ is temporarily unavailable. Delivery is at-least-once: a process crash after RabbitMQ confirms a message but before the outbox row is marked published can cause a duplicate event. Consumers should therefore remain idempotent.
+
+`Failed` is currently used for invalid persisted order data or an unsupported stored status. The API rejects invalid requests, so normal client-created orders follow the successful path unless business failure rules are added.
 
 The API also provides:
 
@@ -51,6 +56,20 @@ dotnet restore DistributedOrderSystem.slnx
 dotnet build DistributedOrderSystem.slnx --no-restore
 docker compose config
 docker compose build
+```
+
+For an end-to-end smoke test, start Compose, submit a valid order in the web client, and confirm its status reaches `Completed` with `Processing` and `Completed` notifications. To test broker recovery, stop RabbitMQ temporarily, create an order (the API should still accept and persist it), then start RabbitMQ again and confirm the order completes.
+
+The API smoke test can be run from the repository root:
+
+```powershell
+.\tests\SmokeTest.ps1
+```
+
+To also stop and restart the Compose RabbitMQ service during the test:
+
+```powershell
+.\tests\SmokeTest.ps1 -TestRabbitMqRecovery
 ```
 
 Each runnable .NET service has its own root-level Dockerfile: `Dockerfile.api`, `Dockerfile.worker`, `Dockerfile.notification`, and `Dockerfile.client`.
