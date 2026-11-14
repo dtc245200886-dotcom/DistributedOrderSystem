@@ -14,5 +14,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\OrderSystem.Shared\OrderSystem.Shared.csproj" />
+    <ProjectReference Include="..\Order.API\Order.API.csproj" />
   </ItemGroup>
 </Project>
