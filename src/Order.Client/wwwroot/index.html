@@ -269,7 +269,7 @@
         <div class="panel-head">
           <div>
             <h2 class="panel-title" id="create-title">Tạo đơn hàng mới</h2>
-            <p class="panel-subtitle">Điền thông tin và thêm sản phẩm vào đơn.</p>
+            <p class="panel-subtitle">Thêm một hoặc nhiều sản phẩm; tất cả sẽ nằm trong cùng một đơn hàng.</p>
           </div>
         </div>
         <div class="panel-content">
@@ -291,7 +291,7 @@
                 <label for="unit-price">Đơn giá (₫)</label>
                 <input class="field" id="unit-price" name="unitPrice" type="number" min="0" step="1000" value="0" inputmode="decimal">
               </div>
-              <button class="add-button" id="add-item" type="button">+ Thêm món</button>
+              <button class="add-button" id="add-item" type="button">+ Thêm sản phẩm</button>
             </div>
 
             <div class="basket" id="basket" aria-live="polite">
@@ -546,7 +546,7 @@
         details.className = "detail-button";
         details.type = "button";
         details.textContent = "Xem chi tiết";
-        details.addEventListener("click", () => showOrderDetails(order));
+        details.addEventListener("click", () => showOrderDetails(order.id));
 
         card.append(main, badge, info, details);
         ordersElement.append(card);
@@ -642,37 +642,56 @@
       showToast(`Đơn của ${event.customerName}: ${statusText(event.newStatus)}`);
     }
 
-    function showOrderDetails(order) {
-      document.getElementById("dialog-order-id").textContent = `Mã đơn: ${order.id}`;
+    async function showOrderDetails(orderId) {
+      document.getElementById("dialog-order-id").textContent = `Mã đơn: ${orderId}`;
       const content = document.getElementById("dialog-content");
       content.replaceChildren();
-      const badge = document.createElement("span");
-      badge.className = `status-badge detail-status ${statusClass(order.status)}`;
-      badge.textContent = statusText(order.status);
-      const created = document.createElement("p");
-      created.className = "panel-subtitle";
-      created.textContent = `Ngày tạo: ${formatDate(order.createdAt)}`;
-      const items = document.createElement("div");
-      items.className = "detail-items";
-      (order.items || []).forEach(item => {
-        const row = document.createElement("div");
-        row.className = "detail-line";
-        const name = document.createElement("span");
-        name.textContent = `${item.productName} · ${item.quantity} × ${formatMoney(item.unitPrice)}`;
-        const price = document.createElement("strong");
-        price.textContent = formatMoney(item.quantity * item.unitPrice);
-        row.append(name, price);
-        items.append(row);
-      });
-      const total = document.createElement("div");
-      total.className = "detail-total";
-      const totalLabel = document.createElement("span");
-      totalLabel.textContent = "Tổng cộng";
-      const totalAmount = document.createElement("strong");
-      totalAmount.textContent = formatMoney(order.totalAmount);
-      total.append(totalLabel, totalAmount);
-      content.append(badge, created, items, total);
+      const loading = document.createElement("p");
+      loading.className = "panel-subtitle";
+      loading.textContent = "Đang tải chi tiết đơn hàng...";
+      content.append(loading);
       dialog.showModal();
+
+      try {
+        const response = await fetch(`${config.orderApiUrl}/orders/${encodeURIComponent(orderId)}`);
+        if (!response.ok) throw new Error(`Máy chủ trả về mã ${response.status}.`);
+        const order = await response.json();
+
+        const badge = document.createElement("span");
+        badge.className = `status-badge detail-status ${statusClass(order.status)}`;
+        badge.textContent = statusText(order.status);
+        const created = document.createElement("p");
+        created.className = "panel-subtitle";
+        created.textContent = `Ngày tạo: ${formatDate(order.createdAt)}`;
+        const items = document.createElement("div");
+        items.className = "detail-items";
+        (order.items || []).forEach(item => {
+          const row = document.createElement("div");
+          row.className = "detail-line";
+          const name = document.createElement("span");
+          name.textContent = `${item.productName} · ${item.quantity} × ${formatMoney(item.unitPrice)}`;
+          const price = document.createElement("strong");
+          price.textContent = formatMoney(item.quantity * item.unitPrice);
+          row.append(name, price);
+          items.append(row);
+        });
+        const total = document.createElement("div");
+        total.className = "detail-total";
+        const totalLabel = document.createElement("span");
+        totalLabel.textContent = "Tổng cộng";
+        const totalAmount = document.createElement("strong");
+        totalAmount.textContent = formatMoney(order.totalAmount);
+        total.append(totalLabel, totalAmount);
+        content.replaceChildren();
+        content.append(badge, created, items, total);
+      } catch (error) {
+        content.replaceChildren();
+        const message = document.createElement("p");
+        message.className = "panel-subtitle";
+        message.textContent = `Không tải được chi tiết đơn hàng. ${error.message}`;
+        content.append(message);
+        showToast(`Không tải được chi tiết đơn hàng: ${error.message}`, true);
+      }
     }
 
     document.getElementById("add-item").addEventListener("click", () => {

@@ -32,11 +32,18 @@ function Send-JsonRequest {
 function New-TestOrder {
     $body = @{
         customerName = "Smoke Test"
-        items = @(@{
-            productName = "Test Product"
-            quantity = 1
-            unitPrice = 10
-        })
+        items = @(
+            @{
+                productName = "Test Product One"
+                quantity = 1
+                unitPrice = 10
+            },
+            @{
+                productName = "Test Product Two"
+                quantity = 2
+                unitPrice = 20
+            }
+        )
     }
 
     $response = Send-JsonRequest -Method "POST" -Path "/orders" -Body $body
@@ -90,6 +97,25 @@ try {
     Write-Output "Invalid order validation: passed"
 
     $order = New-TestOrder
+    $detailResponse = Send-JsonRequest -Method "GET" -Path "/orders/$($order.id)"
+    if ([int]$detailResponse.StatusCode -ne 200) {
+        $details = $detailResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        throw "Expected GET /orders/$($order.id) to return HTTP 200, got $([int]$detailResponse.StatusCode): $details"
+    }
+
+    $detail = $detailResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
+    if ($detail.id -ne $order.id -or @($detail.items).Count -ne 2) {
+        throw "GET /orders/$($order.id) did not return the order with both product items."
+    }
+    Write-Output "Order detail lookup with multiple products: passed"
+
+    $missingId = [guid]::NewGuid()
+    $missingResponse = Send-JsonRequest -Method "GET" -Path "/orders/$missingId"
+    if ([int]$missingResponse.StatusCode -ne 404) {
+        throw "Expected an unknown order to return HTTP 404, got $([int]$missingResponse.StatusCode)."
+    }
+    Write-Output "Missing order lookup: passed"
+
     $listResponse = Send-JsonRequest -Method "GET" -Path "/orders"
     if ([int]$listResponse.StatusCode -ne 200) {
         throw "Expected GET /orders to return HTTP 200, got $([int]$listResponse.StatusCode)."

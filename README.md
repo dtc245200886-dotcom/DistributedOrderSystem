@@ -52,6 +52,8 @@ Order API cung cấp các endpoint:
 - `GET /orders`
 - `GET /orders/{id}`
 
+Giao diện dùng `GET /orders/{id}` khi mở **Xem chi tiết** để tải trạng thái và các sản phẩm của đơn. Một đơn có thể chứa nhiều sản phẩm; các sản phẩm đã thêm sẽ được gửi cùng nhau khi tạo đơn.
+
 ## Build và kiểm thử
 
 Chạy các lệnh sau từ thư mục gốc:
