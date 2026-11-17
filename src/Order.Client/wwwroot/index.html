@@ -3,192 +3,813 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Order Client</title>
+  <meta name="theme-color" content="#f5f7fb">
+  <title>Orderly — Quản lý đơn hàng</title>
   <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@10.0.0/dist/browser/signalr.min.js"></script>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 900px; padding: 0 1rem; color: #172033; }
-    form, .panel { border: 1px solid #d5dbea; border-radius: 8px; margin: 1rem 0; padding: 1rem; }
-    label { display: block; margin: .6rem 0; }
-    input { box-sizing: border-box; max-width: 100%; padding: .5rem; }
-    button { cursor: pointer; padding: .5rem .8rem; }
-    .status { color: #42526e; min-height: 1.5rem; }
-    .error { color: #b42318; }
-    .order { border-top: 1px solid #e5e9f2; padding: .8rem 0; }
-    .notification { padding: .4rem 0; }
+    :root {
+      color-scheme: light;
+      --ink: #17233c;
+      --muted: #74809a;
+      --line: #e7ebf3;
+      --surface: #ffffff;
+      --canvas: #f5f7fb;
+      --brand: #6558d9;
+      --brand-dark: #4c40c2;
+      --brand-soft: #efedff;
+      --teal: #148d81;
+      --teal-soft: #e7f7f3;
+      --amber: #a36513;
+      --amber-soft: #fff4df;
+      --red: #b94152;
+      --red-soft: #fff0f1;
+      --shadow: 0 12px 35px rgba(34, 48, 82, .07);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--canvas); color: var(--ink); font-size: 16px; line-height: 1.55; }
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
+      outline: 3px solid rgba(101, 88, 217, .3);
+      outline-offset: 2px;
+    }
+    .shell { width: min(1200px, calc(100% - 48px)); margin: 0 auto; }
+
+    .topbar { background: rgba(255,255,255,.92); border-bottom: 1px solid var(--line); }
+    .topbar-inner { min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; color: inherit; }
+    .brand-mark {
+      width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px;
+      color: #fff; background: linear-gradient(145deg, #8277ef, #5549cb);
+      box-shadow: 0 7px 16px rgba(101,88,217,.24);
+    }
+    .brand-mark svg { width: 23px; height: 23px; }
+    .brand-name { font-size: 18px; font-weight: 800; letter-spacing: -.5px; }
+    .brand-caption { display: block; color: var(--muted); font-size: 12px; font-weight: 500; letter-spacing: 0; }
+    .topbar-right { display: flex; align-items: center; gap: 18px; }
+    .live-state { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 14px; }
+    .live-dot { width: 9px; height: 9px; border-radius: 50%; background: #d29a38; box-shadow: 0 0 0 4px #fff3da; }
+    .live-state[data-state="connected"] .live-dot { background: #1ca587; box-shadow: 0 0 0 4px #e2f6ef; }
+    .live-state[data-state="error"] .live-dot { background: var(--red); box-shadow: 0 0 0 4px var(--red-soft); }
+    .date-label { color: var(--muted); font-size: 14px; }
+
+    main { padding: 34px 0 56px; }
+    .welcome { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 25px; }
+    .eyebrow { color: var(--brand); font-size: 13px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 4px 0 5px; font-size: clamp(26px, 3vw, 34px); line-height: 1.2; letter-spacing: -.8px; }
+    .welcome p { margin: 0; color: var(--muted); font-size: 16px; }
+    .date-chip { padding: 9px 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: #5e6980; font-size: 14px; white-space: nowrap; }
+
+    .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 22px; }
+    .metric { display: flex; align-items: center; gap: 14px; min-height: 100px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface); box-shadow: 0 4px 18px rgba(34,48,82,.025); }
+    .metric-icon { width: 44px; height: 44px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 14px; background: var(--brand-soft); color: var(--brand); }
+    .metric:nth-child(2) .metric-icon { background: var(--amber-soft); color: var(--amber); }
+    .metric:nth-child(3) .metric-icon { background: var(--teal-soft); color: var(--teal); }
+    .metric-icon svg { width: 21px; height: 21px; }
+    .metric-label { display: block; color: var(--muted); font-size: 14px; }
+    .metric-value { display: block; margin-top: 1px; font-size: 25px; line-height: 1.2; font-weight: 780; letter-spacing: -.5px; }
+
+    .workspace { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, .85fr); gap: 20px; align-items: start; }
+    .panel { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); }
+    .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 21px 23px 16px; }
+    .panel-title { margin: 0; font-size: 19px; line-height: 1.35; letter-spacing: -.25px; }
+    .panel-subtitle { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+    .panel-content { padding: 0 23px 23px; }
+    .section-label { display: block; margin: 17px 0 9px; color: #5e6980; font-size: 13px; font-weight: 730; }
+    .section-label:first-child { margin-top: 0; }
+    .field { width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid #dfe4ee; border-radius: 11px; background: #fff; color: var(--ink); }
+    .field::placeholder { color: #a0a9ba; }
+    .field:hover { border-color: #c8cde0; }
+    .field-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(100px, .65fr) minmax(130px, .8fr) auto; gap: 9px; align-items: end; }
+    .field-wrap label { display: block; margin-bottom: 6px; color: #69758d; font-size: 12px; font-weight: 650; }
+    .field-wrap .field { min-height: 44px; }
+    .add-button { min-height: 44px; padding: 0 13px; border: 1px solid #d8d3ff; border-radius: 11px; background: var(--brand-soft); color: var(--brand-dark); font-size: 14px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+    .add-button:hover { background: #e6e2ff; }
+    .basket { display: grid; gap: 8px; margin-top: 13px; }
+    .basket-empty { padding: 15px; border: 1px dashed #dfe4ee; border-radius: 12px; color: var(--muted); text-align: center; font-size: 14px; }
+    .basket-item { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px; background: #fbfcfe; }
+    .basket-name { overflow: hidden; font-size: 14px; font-weight: 690; text-overflow: ellipsis; white-space: nowrap; }
+    .basket-meta { color: var(--muted); font-size: 13px; }
+    .basket-price { font-size: 14px; font-weight: 730; white-space: nowrap; }
+    .remove-button { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 9px; background: transparent; color: #8892a6; cursor: pointer; }
+    .remove-button:hover { background: var(--red-soft); color: var(--red); }
+    .remove-button svg { width: 17px; height: 17px; }
+    .total-row { display: flex; justify-content: space-between; gap: 12px; margin-top: 13px; padding: 13px 0 15px; border-top: 1px solid var(--line); color: #59657d; font-size: 14px; }
+    .total-row strong { color: var(--ink); font-size: 19px; }
+    .create-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+    .primary-button, .secondary-button, .icon-button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; padding: 0 17px; border-radius: 11px; font-weight: 720; cursor: pointer; transition: background .15s, transform .15s, box-shadow .15s; }
+    .primary-button { border: 0; background: var(--brand); color: #fff; box-shadow: 0 6px 13px rgba(101,88,217,.2); }
+    .primary-button:hover:not(:disabled) { transform: translateY(-1px); background: var(--brand-dark); box-shadow: 0 9px 18px rgba(101,88,217,.25); }
+    .primary-button:disabled { opacity: .58; cursor: wait; }
+    .primary-button svg, .secondary-button svg, .icon-button svg { width: 18px; height: 18px; }
+    .secondary-button { border: 1px solid var(--line); background: #fff; color: #56627a; }
+    .secondary-button:hover { background: #f8f9fc; border-color: #d2d8e5; }
+    .inline-message { min-height: 21px; margin: 11px 0 0; color: var(--teal); font-size: 14px; }
+    .inline-message.error { color: var(--red); }
+    .privacy-note { margin: 12px 0 0; color: #8791a4; font-size: 12px; }
+
+    .activity-panel { position: sticky; top: 18px; }
+    .activity-head-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 11px; background: var(--brand-soft); color: var(--brand); }
+    .activity-head-icon svg { width: 18px; height: 18px; }
+    .activity-list { display: grid; gap: 2px; max-height: 412px; overflow-y: auto; }
+    .activity-empty { padding: 24px 12px 28px; color: var(--muted); text-align: center; font-size: 14px; }
+    .activity-item { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 11px; padding: 12px 0; border-top: 1px solid #f0f2f7; }
+    .activity-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 10px; background: var(--teal-soft); color: var(--teal); }
+    .activity-icon svg { width: 16px; height: 16px; }
+    .activity-copy { min-width: 0; }
+    .activity-copy strong { display: block; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .activity-copy p { margin: 2px 0 0; color: #657189; font-size: 13px; }
+    .activity-time { display: block; margin-top: 3px; color: #98a1b1; font-size: 12px; }
+
+    .orders-panel { margin-top: 20px; }
+    .orders-head { align-items: center; }
+    .orders-actions { display: flex; gap: 9px; }
+    .icon-button { width: 43px; padding: 0; border: 1px solid var(--line); background: #fff; color: #66728a; }
+    .icon-button:hover { background: #f8f9fc; }
+    .filters { display: grid; grid-template-columns: minmax(200px, 1fr) 190px auto; gap: 10px; padding: 0 23px 16px; }
+    .search-wrap { position: relative; }
+    .search-wrap svg { position: absolute; top: 50%; left: 13px; width: 18px; height: 18px; color: #909aae; transform: translateY(-50%); pointer-events: none; }
+    .search-wrap input { padding-left: 40px; }
+    .result-count { display: flex; align-items: center; justify-content: flex-end; color: var(--muted); font-size: 13px; white-space: nowrap; }
+    .orders-list { display: grid; gap: 10px; padding: 0 23px 23px; }
+    .order-card { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(110px, .65fr) minmax(120px, .7fr) auto; align-items: center; gap: 15px; padding: 15px; border: 1px solid var(--line); border-radius: 14px; background: #fff; transition: border-color .15s, box-shadow .15s; }
+    .order-card:hover { border-color: #d7d2ff; box-shadow: 0 5px 16px rgba(50,56,110,.05); }
+    .order-main { min-width: 0; }
+    .order-customer { display: block; overflow: hidden; font-size: 15px; font-weight: 760; text-overflow: ellipsis; white-space: nowrap; }
+    .order-id { display: block; overflow: hidden; margin-top: 3px; color: #8a94a7; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .order-info-label { display: block; color: #939caf; font-size: 12px; }
+    .order-info-value { display: block; margin-top: 2px; color: #44516a; font-size: 14px; font-weight: 660; }
+    .status-badge { display: inline-flex; align-items: center; gap: 6px; width: fit-content; padding: 5px 9px; border-radius: 999px; font-size: 12px; font-weight: 720; white-space: nowrap; }
+    .status-badge::before { width: 6px; height: 6px; border-radius: 50%; background: currentColor; content: ""; }
+    .status-pending { background: var(--amber-soft); color: var(--amber); }
+    .status-processing { background: var(--brand-soft); color: var(--brand-dark); }
+    .status-completed { background: var(--teal-soft); color: var(--teal); }
+    .status-failed { background: var(--red-soft); color: var(--red); }
+    .detail-button { min-height: 38px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: #59657c; font-size: 13px; font-weight: 680; cursor: pointer; white-space: nowrap; }
+    .detail-button:hover { border-color: #c9c3ff; color: var(--brand-dark); background: #fbfaff; }
+    .list-state { padding: 34px 16px; border: 1px dashed #dfe4ee; border-radius: 14px; color: var(--muted); text-align: center; }
+    .list-state strong { display: block; margin-bottom: 4px; color: #56627a; }
+    .list-state p { margin: 0; font-size: 14px; }
+    .footer-note { padding: 18px 0 0; color: #929bad; text-align: center; font-size: 12px; }
+
+    dialog { width: min(520px, calc(100% - 28px)); max-height: min(84vh, 720px); padding: 0; overflow: auto; border: 1px solid var(--line); border-radius: 18px; background: #fff; color: var(--ink); box-shadow: 0 24px 80px rgba(20,30,58,.22); }
+    dialog::backdrop { background: rgba(23,35,60,.42); backdrop-filter: blur(3px); }
+    .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 22px 23px 17px; border-bottom: 1px solid var(--line); }
+    .dialog-head h2 { margin: 0; font-size: 20px; }
+    .dialog-head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+    .dialog-body { padding: 20px 23px 23px; }
+    .detail-status { margin-bottom: 17px; }
+    .detail-items { display: grid; gap: 9px; }
+    .detail-line { display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-bottom: 1px solid #f0f2f7; font-size: 14px; }
+    .detail-line span:first-child { color: #5d6980; }
+    .detail-total { display: flex; justify-content: space-between; gap: 12px; padding-top: 16px; font-size: 15px; }
+    .detail-total strong { font-size: 18px; }
+    .toast { position: fixed; right: 22px; bottom: 22px; z-index: 3; max-width: min(420px, calc(100% - 44px)); padding: 13px 16px; border: 1px solid #d4eee5; border-radius: 13px; background: #f0fbf6; color: #17684f; box-shadow: var(--shadow); font-size: 14px; }
+    .toast.error { border-color: #f3d4d7; background: #fff5f5; color: #a63040; }
+    [hidden] { display: none !important; }
+
+    @media (max-width: 860px) {
+      .workspace { grid-template-columns: 1fr; }
+      .activity-panel { position: static; }
+      .activity-list { max-height: 260px; }
+    }
+    @media (max-width: 640px) {
+      .shell { width: min(100% - 28px, 520px); }
+      .topbar-inner { min-height: 66px; }
+      .brand-mark { width: 38px; height: 38px; border-radius: 12px; }
+      .date-label { display: none; }
+      main { padding-top: 25px; }
+      .welcome { align-items: flex-start; flex-direction: column; gap: 12px; margin-bottom: 19px; }
+      .welcome p { font-size: 15px; }
+      .date-chip { padding: 7px 10px; font-size: 13px; }
+      .metrics { gap: 9px; margin-bottom: 16px; }
+      .metric { min-height: 85px; align-items: flex-start; flex-direction: column; gap: 7px; padding: 12px; border-radius: 14px; }
+      .metric-icon { width: 32px; height: 32px; border-radius: 10px; }
+      .metric-icon svg { width: 17px; height: 17px; }
+      .metric-label { font-size: 11px; line-height: 1.25; }
+      .metric-value { font-size: 21px; }
+      .panel { border-radius: 15px; }
+      .panel-head { padding: 18px 16px 13px; }
+      .panel-content { padding: 0 16px 18px; }
+      .panel-title { font-size: 18px; }
+      .field-grid { grid-template-columns: 1fr 1fr; }
+      .field-wrap:first-child { grid-column: 1 / -1; }
+      .add-button { width: 100%; }
+      .create-row { align-items: stretch; flex-direction: column; }
+      .create-row .primary-button { width: 100%; }
+      .basket-item { grid-template-columns: minmax(0, 1fr) auto auto; gap: 7px; padding: 10px 9px; }
+      .basket-price { font-size: 13px; }
+      .filters { grid-template-columns: 1fr 1fr; padding: 0 16px 13px; }
+      .search-wrap { grid-column: 1 / -1; }
+      .result-count { justify-content: flex-start; }
+      .orders-list { padding: 0 16px 17px; }
+      .order-card { grid-template-columns: minmax(0, 1fr) auto; gap: 9px 12px; padding: 12px; }
+      .order-card .order-main { grid-column: 1 / -1; }
+      .order-card .status-badge { grid-column: 1; grid-row: 2; }
+      .order-card .order-info { grid-column: 1; }
+      .order-card .detail-button { grid-column: 2; grid-row: 2 / span 2; }
+      .result-count { font-size: 12px; }
+      .toast { right: 14px; bottom: 14px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+    }
   </style>
 </head>
 <body>
-  <h1>Theo dõi đơn hàng</h1>
-  <p id="connection" class="status">Đang kết nối dịch vụ...</p>
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <a class="brand" href="/" aria-label="Orderly — trang chủ">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M7 3.75h7.5L19 8.3v11.95H7a2 2 0 0 1-2-2v-12.5a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M14 4v4.5h4.5M9 12h6M9 15.5h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </span>
+        <span class="brand-name">Orderly<span class="brand-caption">Quản lý đơn hàng</span></span>
+      </a>
+      <div class="topbar-right">
+        <span class="date-label" id="today-label"></span>
+        <div class="live-state" id="connection" data-state="connecting" role="status" aria-live="polite">
+          <span class="live-dot" aria-hidden="true"></span>
+          <span id="connection-text">Đang kết nối...</span>
+        </div>
+      </div>
+    </div>
+  </header>
 
-  <section class="panel">
-    <h2>Tạo đơn hàng</h2>
-    <form id="order-form">
-      <label>Tên khách hàng
-        <input name="customerName" required maxlength="200">
-      </label>
-      <label>Sản phẩm
-        <input name="productName" required maxlength="200">
-      </label>
-      <label>Số lượng
-        <input name="quantity" type="number" min="1" value="1" required>
-      </label>
-      <label>Đơn giá
-        <input name="unitPrice" type="number" min="0" step="0.01" value="0" required>
-      </label>
-      <button type="submit">Tạo đơn</button>
-      <p id="form-message" class="status" role="status"></p>
-    </form>
-  </section>
+  <main class="shell">
+    <section class="welcome" aria-labelledby="page-title">
+      <div>
+        <div class="eyebrow">Không gian làm việc</div>
+        <h1 id="page-title">Xin chào, hôm nay bạn thế nào?</h1>
+        <p>Theo dõi và quản lý đơn hàng của bạn thật đơn giản.</p>
+      </div>
+      <div class="date-chip" id="date-chip"></div>
+    </section>
 
-  <section class="panel">
-    <h2>Đơn hàng</h2>
-    <button id="refresh" type="button">Làm mới</button>
-    <div id="orders" aria-live="polite"></div>
-  </section>
+    <section class="metrics" aria-label="Tổng quan đơn hàng">
+      <article class="metric">
+        <span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 6.5h14v14H5zM8 3.5v6M16 3.5v6M5 10h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span><span class="metric-label">Tổng đơn hàng</span><strong class="metric-value" id="total-count">—</strong></span>
+      </article>
+      <article class="metric">
+        <span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span><span class="metric-label">Đang xử lý</span><strong class="metric-value" id="processing-count">—</strong></span>
+      </article>
+      <article class="metric">
+        <span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="m5 12.5 4.2 4.2L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/></svg></span>
+        <span><span class="metric-label">Đã hoàn thành</span><strong class="metric-value" id="completed-count">—</strong></span>
+      </article>
+    </section>
 
-  <section class="panel">
-    <h2>Thông báo trạng thái</h2>
-    <div id="notifications" aria-live="polite"></div>
-  </section>
+    <div class="workspace">
+      <section class="panel" aria-labelledby="create-title">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title" id="create-title">Tạo đơn hàng mới</h2>
+            <p class="panel-subtitle">Điền thông tin và thêm sản phẩm vào đơn.</p>
+          </div>
+        </div>
+        <div class="panel-content">
+          <form id="order-form">
+            <label class="section-label" for="customer-name">Thông tin khách hàng</label>
+            <input class="field" id="customer-name" name="customerName" autocomplete="name" maxlength="200" placeholder="Ví dụ: Nguyễn Minh Anh" required>
+
+            <label class="section-label" for="product-name">Danh sách sản phẩm</label>
+            <div class="field-grid">
+              <div class="field-wrap">
+                <label for="product-name">Tên sản phẩm</label>
+                <input class="field" id="product-name" name="productName" maxlength="200" placeholder="Ví dụ: Tai nghe không dây">
+              </div>
+              <div class="field-wrap">
+                <label for="quantity">Số lượng</label>
+                <input class="field" id="quantity" name="quantity" type="number" min="1" step="1" value="1" inputmode="numeric">
+              </div>
+              <div class="field-wrap">
+                <label for="unit-price">Đơn giá (₫)</label>
+                <input class="field" id="unit-price" name="unitPrice" type="number" min="0" step="1000" value="0" inputmode="decimal">
+              </div>
+              <button class="add-button" id="add-item" type="button">+ Thêm món</button>
+            </div>
+
+            <div class="basket" id="basket" aria-live="polite">
+              <div class="basket-empty">Chưa có sản phẩm. Thêm ít nhất một sản phẩm để tiếp tục.</div>
+            </div>
+            <div class="total-row"><span>Tổng cộng</span><strong id="order-total">0 ₫</strong></div>
+            <div class="create-row">
+              <p class="privacy-note">Thông tin đơn hàng được lưu an toàn trong hệ thống.</p>
+              <button class="primary-button" id="submit-order" type="submit">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Tạo đơn hàng
+              </button>
+            </div>
+            <p class="inline-message" id="form-message" role="status" aria-live="polite"></p>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel activity-panel" aria-labelledby="activity-title">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title" id="activity-title">Hoạt động gần đây</h2>
+            <p class="panel-subtitle">Cập nhật trạng thái theo thời gian thực.</p>
+          </div>
+          <span class="activity-head-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        </div>
+        <div class="panel-content">
+          <div class="activity-list" id="notifications" aria-live="polite">
+            <div class="activity-empty" id="activity-empty">Thông báo mới sẽ xuất hiện tại đây.</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel orders-panel" aria-labelledby="orders-title">
+      <div class="panel-head orders-head">
+        <div>
+          <h2 class="panel-title" id="orders-title">Đơn hàng của bạn</h2>
+          <p class="panel-subtitle">Tra cứu trạng thái và xem thông tin từng đơn.</p>
+        </div>
+        <div class="orders-actions">
+          <button class="icon-button" id="refresh" type="button" aria-label="Làm mới danh sách" title="Làm mới danh sách">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="filters">
+        <div class="search-wrap">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8" stroke="currentColor" stroke-width="1.8"/><path d="m16 16 4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <input class="field" id="search-orders" type="search" placeholder="Tìm theo tên hoặc mã đơn..." aria-label="Tìm đơn hàng">
+        </div>
+        <select class="field" id="status-filter" aria-label="Lọc theo trạng thái">
+          <option value="all">Tất cả trạng thái</option>
+          <option value="Pending">Chờ xử lý</option>
+          <option value="Processing">Đang xử lý</option>
+          <option value="Completed">Đã hoàn thành</option>
+          <option value="Failed">Đã thất bại</option>
+        </select>
+        <span class="result-count" id="result-count"></span>
+      </div>
+      <div class="orders-list" id="orders" aria-live="polite" aria-busy="true">
+        <div class="list-state"><strong>Đang tải đơn hàng</strong><p>Vui lòng đợi trong giây lát...</p></div>
+      </div>
+    </section>
+    <footer class="footer-note">Orderly · Theo dõi đơn hàng đơn giản, rõ ràng và an tâm.</footer>
+  </main>
+
+  <dialog id="order-dialog" aria-labelledby="dialog-title">
+    <div class="dialog-head">
+      <div>
+        <h2 id="dialog-title">Chi tiết đơn hàng</h2>
+        <p id="dialog-order-id"></p>
+      </div>
+      <button class="icon-button" id="close-dialog" type="button" aria-label="Đóng chi tiết">✕</button>
+    </div>
+    <div class="dialog-body" id="dialog-content"></div>
+  </dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
   <script>
     const ordersElement = document.getElementById("orders");
     const notificationsElement = document.getElementById("notifications");
+    const activityEmpty = document.getElementById("activity-empty");
     const formMessage = document.getElementById("form-message");
-    const connectionMessage = document.getElementById("connection");
+    const connection = document.getElementById("connection");
+    const connectionText = document.getElementById("connection-text");
+    const basketElement = document.getElementById("basket");
+    const submitButton = document.getElementById("submit-order");
+    const dialog = document.getElementById("order-dialog");
+    const toast = document.getElementById("toast");
+    const statusLabels = {
+      Pending: "Chờ xử lý",
+      Processing: "Đang xử lý",
+      Completed: "Đã hoàn thành",
+      Failed: "Đã thất bại"
+    };
+    const currency = new Intl.NumberFormat("vi-VN", {
+      style: "currency",
+      currency: "VND",
+      maximumFractionDigits: 0
+    });
     let config;
     let hub;
+    let orders = [];
+    let basket = [];
+    let toastTimer;
 
-    function showError(element, error) {
-      element.textContent = error.message || String(error);
-      element.classList.add("error");
+    const formatMoney = value => currency.format(value || 0);
+    const formatDate = value => new Intl.DateTimeFormat("vi-VN", {
+      dateStyle: "medium",
+      timeStyle: "short"
+    }).format(new Date(value));
+
+    document.getElementById("today-label").textContent =
+      new Intl.DateTimeFormat("vi-VN", { weekday: "short", day: "numeric", month: "short" }).format(new Date());
+    document.getElementById("date-chip").textContent =
+      new Intl.DateTimeFormat("vi-VN", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date());
+
+    function showToast(message, isError = false) {
+      clearTimeout(toastTimer);
+      toast.textContent = message;
+      toast.classList.toggle("error", isError);
+      toast.hidden = false;
+      toastTimer = setTimeout(() => { toast.hidden = true; }, 4500);
     }
 
-    function renderOrders(orders) {
+    function setConnection(state, message) {
+      connection.dataset.state = state;
+      connectionText.textContent = message;
+    }
+
+    function setFormMessage(message, isError = false) {
+      formMessage.textContent = message;
+      formMessage.classList.toggle("error", isError);
+    }
+
+    function statusClass(status) {
+      return `status-${String(status).toLowerCase()}`;
+    }
+
+    function statusText(status) {
+      return statusLabels[status] || status;
+    }
+
+    function updateSummary() {
+      document.getElementById("total-count").textContent = orders.length;
+      document.getElementById("processing-count").textContent =
+        orders.filter(order => order.status === "Pending" || order.status === "Processing").length;
+      document.getElementById("completed-count").textContent =
+        orders.filter(order => order.status === "Completed").length;
+    }
+
+    function renderBasket() {
+      basketElement.replaceChildren();
+      if (basket.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "basket-empty";
+        empty.textContent = "Chưa có sản phẩm. Thêm ít nhất một sản phẩm để tiếp tục.";
+        basketElement.append(empty);
+      } else {
+        basket.forEach((item, index) => {
+          const row = document.createElement("div");
+          row.className = "basket-item";
+          const description = document.createElement("div");
+          const name = document.createElement("div");
+          name.className = "basket-name";
+          name.textContent = item.productName;
+          const meta = document.createElement("div");
+          meta.className = "basket-meta";
+          meta.textContent = `${item.quantity} × ${formatMoney(item.unitPrice)}`;
+          description.append(name, meta);
+          const price = document.createElement("span");
+          price.className = "basket-price";
+          price.textContent = formatMoney(item.quantity * item.unitPrice);
+          const remove = document.createElement("button");
+          remove.className = "remove-button";
+          remove.type = "button";
+          remove.setAttribute("aria-label", `Xóa ${item.productName} khỏi đơn`);
+          remove.innerHTML = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M5.5 7l1 13h11l1-13M9 7V4h6v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+          remove.addEventListener("click", () => {
+            basket.splice(index, 1);
+            renderBasket();
+          });
+          row.append(description, price, remove);
+          basketElement.append(row);
+        });
+      }
+
+      const total = basket.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+      document.getElementById("order-total").textContent = formatMoney(total);
+      submitButton.disabled = basket.length === 0;
+    }
+
+    function renderOrders() {
+      const query = document.getElementById("search-orders").value.trim().toLocaleLowerCase("vi");
+      const filter = document.getElementById("status-filter").value;
+      const filtered = orders.filter(order => {
+        const matchesText = !query ||
+          order.customerName.toLocaleLowerCase("vi").includes(query) ||
+          order.id.toLocaleLowerCase("vi").includes(query);
+        return matchesText && (filter === "all" || order.status === filter);
+      });
+
       ordersElement.replaceChildren();
-      if (orders.length === 0) {
-        ordersElement.textContent = "Chưa có đơn hàng.";
+      ordersElement.setAttribute("aria-busy", "false");
+      document.getElementById("result-count").textContent = `${filtered.length} đơn hàng`;
+      if (filtered.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "list-state";
+        const title = document.createElement("strong");
+        title.textContent = orders.length === 0 ? "Chưa có đơn hàng nào" : "Không tìm thấy đơn phù hợp";
+        const detail = document.createElement("p");
+        detail.textContent = orders.length === 0
+          ? "Tạo đơn hàng đầu tiên của bạn bằng biểu mẫu phía trên."
+          : "Thử đổi từ khóa tìm kiếm hoặc trạng thái lọc.";
+        empty.append(title, detail);
+        ordersElement.append(empty);
+        updateSummary();
         return;
       }
 
-      for (const order of orders) {
-        const row = document.createElement("article");
-        row.className = "order";
-        row.dataset.orderId = order.id;
-        const title = document.createElement("strong");
-        title.textContent = `${order.customerName} — ${order.status}`;
-        const details = document.createElement("p");
-        details.textContent = `Mã: ${order.id} | Tổng: ${order.totalAmount}`;
-        row.append(title, details);
-        ordersElement.append(row);
-      }
+      filtered.forEach(order => {
+        const card = document.createElement("article");
+        card.className = "order-card";
+        card.dataset.orderId = order.id;
+
+        const main = document.createElement("div");
+        main.className = "order-main";
+        const customer = document.createElement("strong");
+        customer.className = "order-customer";
+        customer.textContent = order.customerName;
+        const orderId = document.createElement("span");
+        orderId.className = "order-id";
+        orderId.textContent = `Mã đơn: ${order.id}`;
+        main.append(customer, orderId);
+
+        const badge = document.createElement("span");
+        badge.className = `status-badge ${statusClass(order.status)}`;
+        badge.textContent = statusText(order.status);
+
+        const info = document.createElement("div");
+        info.className = "order-info";
+        const label = document.createElement("span");
+        label.className = "order-info-label";
+        label.textContent = "Tổng giá trị";
+        const amount = document.createElement("strong");
+        amount.className = "order-info-value";
+        amount.textContent = formatMoney(order.totalAmount);
+        info.append(label, amount);
+
+        const details = document.createElement("button");
+        details.className = "detail-button";
+        details.type = "button";
+        details.textContent = "Xem chi tiết";
+        details.addEventListener("click", () => showOrderDetails(order));
+
+        card.append(main, badge, info, details);
+        ordersElement.append(card);
+      });
+      updateSummary();
     }
 
-    async function trackOrders(orders) {
+    function renderOrderLoadError(message) {
+      ordersElement.replaceChildren();
+      ordersElement.setAttribute("aria-busy", "false");
+      const state = document.createElement("div");
+      state.className = "list-state";
+      const title = document.createElement("strong");
+      title.textContent = "Chưa tải được danh sách đơn";
+      const detail = document.createElement("p");
+      detail.textContent = message;
+      const retry = document.createElement("button");
+      retry.className = "secondary-button";
+      retry.type = "button";
+      retry.style.marginTop = "14px";
+      retry.textContent = "Thử tải lại";
+      retry.addEventListener("click", () => loadOrders());
+      state.append(title, detail, retry);
+      ordersElement.append(state);
+    }
+
+    async function trackOrders(orderList) {
       if (!hub || hub.state !== signalR.HubConnectionState.Connected) return;
-      for (const order of orders) {
+      for (const order of orderList) {
         await hub.invoke("TrackOrder", order.id);
       }
     }
 
-    async function loadOrders() {
-      const response = await fetch(`${config.orderApiUrl}/orders`);
-      if (!response.ok) throw new Error(`Không tải được đơn hàng (HTTP ${response.status}).`);
-      const orders = await response.json();
-      renderOrders(orders);
-      await trackOrders(orders);
+    async function loadOrders({ quiet = false } = {}) {
+      if (!config) return;
+      if (!quiet) {
+        ordersElement.setAttribute("aria-busy", "true");
+        setConnection("connecting", "Đang cập nhật...");
+      }
+      try {
+        const response = await fetch(`${config.orderApiUrl}/orders`);
+        if (!response.ok) throw new Error(`Máy chủ trả về mã ${response.status}.`);
+        orders = await response.json();
+        renderOrders();
+        await trackOrders(orders);
+        setConnection(
+          hub && hub.state === signalR.HubConnectionState.Connected ? "connected" : "error",
+          hub && hub.state === signalR.HubConnectionState.Connected
+            ? "Đang cập nhật trực tiếp"
+            : "Chưa kết nối thông báo"
+        );
+      } catch (error) {
+        renderOrderLoadError(`Vui lòng kiểm tra kết nối rồi thử lại. (${error.message})`);
+        setConnection("error", "Không kết nối được");
+        showToast(`Không tải được đơn hàng: ${error.message}`, true);
+      }
     }
 
-    async function start() {
-      config = await fetch("/config").then(async response => {
-        if (!response.ok) throw new Error("Không tải được cấu hình client.");
-        return response.json();
+    function addActivity(event) {
+      if (activityEmpty.isConnected) activityEmpty.remove();
+      const item = document.createElement("article");
+      item.className = "activity-item";
+      const icon = document.createElement("span");
+      icon.className = "activity-icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none"><path d="m5 12.5 4.2 4.2L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      const copy = document.createElement("div");
+      copy.className = "activity-copy";
+      const title = document.createElement("strong");
+      title.textContent = `${event.customerName} · ${statusText(event.newStatus)}`;
+      const description = document.createElement("p");
+      description.textContent = event.message;
+      const time = document.createElement("time");
+      time.className = "activity-time";
+      time.dateTime = event.timestamp;
+      time.textContent = formatDate(event.timestamp);
+      copy.append(title, description, time);
+      item.append(icon, copy);
+      notificationsElement.prepend(item);
+      while (notificationsElement.children.length > 21) {
+        notificationsElement.lastElementChild.remove();
+      }
+    }
+
+    function receiveOrderUpdate(event) {
+      const order = orders.find(item => item.id.toLowerCase() === event.orderId.toLowerCase());
+      if (order) {
+        order.status = event.newStatus;
+        order.updatedAt = event.timestamp;
+      }
+      addActivity(event);
+      renderOrders();
+      showToast(`Đơn của ${event.customerName}: ${statusText(event.newStatus)}`);
+    }
+
+    function showOrderDetails(order) {
+      document.getElementById("dialog-order-id").textContent = `Mã đơn: ${order.id}`;
+      const content = document.getElementById("dialog-content");
+      content.replaceChildren();
+      const badge = document.createElement("span");
+      badge.className = `status-badge detail-status ${statusClass(order.status)}`;
+      badge.textContent = statusText(order.status);
+      const created = document.createElement("p");
+      created.className = "panel-subtitle";
+      created.textContent = `Ngày tạo: ${formatDate(order.createdAt)}`;
+      const items = document.createElement("div");
+      items.className = "detail-items";
+      (order.items || []).forEach(item => {
+        const row = document.createElement("div");
+        row.className = "detail-line";
+        const name = document.createElement("span");
+        name.textContent = `${item.productName} · ${item.quantity} × ${formatMoney(item.unitPrice)}`;
+        const price = document.createElement("strong");
+        price.textContent = formatMoney(item.quantity * item.unitPrice);
+        row.append(name, price);
+        items.append(row);
       });
+      const total = document.createElement("div");
+      total.className = "detail-total";
+      const totalLabel = document.createElement("span");
+      totalLabel.textContent = "Tổng cộng";
+      const totalAmount = document.createElement("strong");
+      totalAmount.textContent = formatMoney(order.totalAmount);
+      total.append(totalLabel, totalAmount);
+      content.append(badge, created, items, total);
+      dialog.showModal();
+    }
 
-      hub = new signalR.HubConnectionBuilder()
-        .withUrl(config.notificationHubUrl)
-        .withAutomaticReconnect()
-        .build();
+    document.getElementById("add-item").addEventListener("click", () => {
+      const nameInput = document.getElementById("product-name");
+      const quantityInput = document.getElementById("quantity");
+      const priceInput = document.getElementById("unit-price");
+      const productName = nameInput.value.trim();
+      const quantity = Number(quantityInput.value);
+      const unitPrice = Number(priceInput.value);
 
-      hub.on("ReceiveOrderNotification", event => {
-        const orderRow = [...ordersElement.querySelectorAll(".order")]
-          .find(row => row.dataset.orderId.toLowerCase() === event.orderId.toLowerCase());
-        if (orderRow) {
-          orderRow.querySelector("strong").textContent = `${event.customerName} — ${event.newStatus}`;
-        }
-
-        const entry = document.createElement("p");
-        entry.className = "notification";
-        entry.textContent = `${event.customerName}: ${event.oldStatus} → ${event.newStatus} — ${event.message}`;
-        notificationsElement.prepend(entry);
-      });
-
-      hub.onreconnected(async () => {
-        connectionMessage.textContent = "Đã kết nối nhận thông báo.";
-        try {
-          await loadOrders();
-        } catch (error) {
-          showError(connectionMessage, error);
-        }
-      });
-
-      try {
-        await hub.start();
-        connectionMessage.textContent = "Đã kết nối nhận thông báo.";
-      } catch (error) {
-        showError(connectionMessage, error);
+      if (!productName) {
+        nameInput.focus();
+        showToast("Vui lòng nhập tên sản phẩm.", true);
+        return;
+      }
+      if (!Number.isSafeInteger(quantity) || quantity <= 0) {
+        quantityInput.focus();
+        showToast("Số lượng phải là số nguyên lớn hơn 0.", true);
+        return;
+      }
+      if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+        priceInput.focus();
+        showToast("Đơn giá phải là số không âm.", true);
+        return;
       }
 
-      await loadOrders();
-    }
+      basket.push({ productName, quantity, unitPrice });
+      renderBasket();
+      nameInput.value = "";
+      quantityInput.value = "1";
+      priceInput.value = "0";
+      nameInput.focus();
+    });
 
     document.getElementById("order-form").addEventListener("submit", async event => {
       event.preventDefault();
-      const orderForm = event.currentTarget;
-      formMessage.classList.remove("error");
-      formMessage.textContent = "Đang tạo đơn...";
-      const form = new FormData(orderForm);
-      const payload = {
-        customerName: form.get("customerName"),
-        items: [{
-          productName: form.get("productName"),
-          quantity: Number(form.get("quantity")),
-          unitPrice: Number(form.get("unitPrice"))
-        }]
-      };
+      const customerName = document.getElementById("customer-name").value.trim();
+      if (!customerName) {
+        document.getElementById("customer-name").focus();
+        setFormMessage("Vui lòng nhập tên khách hàng.", true);
+        return;
+      }
+      if (basket.length === 0) {
+        setFormMessage("Vui lòng thêm ít nhất một sản phẩm.", true);
+        return;
+      }
 
+      submitButton.disabled = true;
+      submitButton.textContent = "Đang tạo đơn...";
+      setFormMessage("");
       try {
         const response = await fetch(`${config.orderApiUrl}/orders`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
+          body: JSON.stringify({ customerName, items: basket })
         });
         const result = await response.json();
         if (!response.ok) {
-          throw new Error(result.detail || result.message || `Tạo đơn thất bại (HTTP ${response.status}).`);
+          throw new Error(result.detail || result.message || `Máy chủ trả về mã ${response.status}.`);
         }
 
-        formMessage.textContent = `Đã tạo đơn ${result.id}.`;
-        orderForm.reset();
-        if (hub.state === signalR.HubConnectionState.Connected) {
-          await hub.invoke("TrackOrder", result.id);
+        document.getElementById("order-form").reset();
+        basket = [];
+        renderBasket();
+        setFormMessage(`Đã tạo đơn hàng ${result.id}. Đơn đang được xử lý.`);
+        showToast("Tạo đơn hàng thành công.");
+        if (hub && hub.state === signalR.HubConnectionState.Connected) {
+          try {
+            await hub.invoke("TrackOrder", result.id);
+          } catch (error) {
+            setFormMessage(`Đơn đã tạo nhưng chưa bật được theo dõi trực tiếp: ${error.message}`, true);
+          }
         }
-        await loadOrders();
+        await loadOrders({ quiet: true });
       } catch (error) {
-        showError(formMessage, error);
+        setFormMessage(`Chưa tạo được đơn: ${error.message}`, true);
+      } finally {
+        submitButton.disabled = basket.length === 0;
+        submitButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>Tạo đơn hàng';
       }
     });
 
     document.getElementById("refresh").addEventListener("click", async () => {
+      const button = document.getElementById("refresh");
+      button.disabled = true;
       try {
         await loadOrders();
-      } catch (error) {
-        showError(connectionMessage, error);
+      } finally {
+        button.disabled = false;
       }
     });
+    document.getElementById("search-orders").addEventListener("input", renderOrders);
+    document.getElementById("status-filter").addEventListener("change", renderOrders);
+    document.getElementById("close-dialog").addEventListener("click", () => dialog.close());
+    dialog.addEventListener("click", event => {
+      if (event.target === dialog) dialog.close();
+    });
 
-    start().catch(error => showError(connectionMessage, error));
+    async function start() {
+      try {
+        const response = await fetch("/config");
+        if (!response.ok) throw new Error("Không tải được cấu hình dịch vụ.");
+        config = await response.json();
+        if (typeof signalR === "undefined") {
+          setConnection("error", "Không tải được dịch vụ thông báo");
+        } else {
+          hub = new signalR.HubConnectionBuilder()
+            .withUrl(config.notificationHubUrl)
+            .withAutomaticReconnect()
+            .build();
+          hub.on("ReceiveOrderNotification", receiveOrderUpdate);
+          hub.onreconnecting(() => setConnection("connecting", "Đang kết nối lại..."));
+          hub.onreconnected(async () => {
+            setConnection("connected", "Đang cập nhật trực tiếp");
+            try {
+              await loadOrders({ quiet: true });
+            } catch {
+              setConnection("error", "Không kết nối được");
+            }
+          });
+          try {
+            await hub.start();
+            setConnection("connected", "Đang cập nhật trực tiếp");
+          } catch {
+            setConnection("error", "Chưa kết nối thông báo");
+          }
+        }
+        await loadOrders();
+      } catch (error) {
+        setConnection("error", "Không kết nối được");
+        renderOrderLoadError(`Không kết nối được với dịch vụ. (${error.message})`);
+        setFormMessage(`Không tải được dữ liệu: ${error.message}`, true);
+      }
+    }
+
+    renderBasket();
+    start();
   </script>
 </body>
 </html>
