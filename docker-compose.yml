@@ -5,6 +5,7 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: order_postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-order_db}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -25,6 +26,7 @@ services:
   rabbitmq:
     image: rabbitmq:3-management-alpine
     container_name: order_rabbitmq
+    restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-orderapp}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-orderapp_dev_password}
@@ -41,6 +43,7 @@ services:
 
   # 3. Order API
   order-api:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile.api
@@ -65,6 +68,7 @@ services:
 
   # 4. Order Worker
   order-worker:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile.worker
@@ -84,6 +88,7 @@ services:
 
   # 5. Notification Service
   notification-service:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile.notification
@@ -105,6 +110,7 @@ services:
 
   # 6. Order Client Web App
   order-client:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile.client

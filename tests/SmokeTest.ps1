@@ -1,6 +1,7 @@
 param(
     [string]$ApiUrl = "http://localhost:5000",
-    [switch]$TestRabbitMqRecovery
+    [switch]$TestRabbitMqRecovery,
+    [switch]$TestContainerRestart
 )
 
 $ErrorActionPreference = "Stop"
@@ -155,6 +156,49 @@ try {
 
         $recoveredOrder = Wait-ForOrderStatus -OrderId $pendingOrder.id -ExpectedStatus "Completed"
         Write-Output "Outbox recovery: $($recoveredOrder.id) reached $($recoveredOrder.status)"
+    }
+
+    if ($TestContainerRestart) {
+        $containers = @(
+            "order_postgres",
+            "order_rabbitmq",
+            "order_api",
+            "order_worker",
+            "notification_service",
+            "order_client"
+        )
+        foreach ($container in $containers) {
+            $restartPolicy = docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' $container
+            if ($LASTEXITCODE -ne 0 -or $restartPolicy -ne "unless-stopped") {
+                throw "Container '$container' does not have the expected restart policy."
+            }
+        }
+
+        $initialRestartCount = [int](docker inspect -f '{{.RestartCount}}' order_worker)
+        docker exec order_worker sh -c 'kill -TERM 1'
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not stop the Order Worker process for the restart test."
+        }
+
+        $deadline = [DateTime]::UtcNow.AddSeconds(60)
+        do {
+            $workerState = docker inspect -f '{{.State.Status}}' order_worker
+            $restartCount = [int](docker inspect -f '{{.RestartCount}}' order_worker)
+            if ($workerState -eq "running" -and $restartCount -gt $initialRestartCount) {
+                break
+            }
+
+            Start-Sleep -Seconds 1
+        } while ([DateTime]::UtcNow -lt $deadline)
+
+        if ($workerState -ne "running" -or $restartCount -le $initialRestartCount) {
+            throw "Order Worker did not automatically restart within 60 seconds."
+        }
+        Write-Output "Order Worker container automatic restart: passed"
+
+        $restartedOrder = New-TestOrder
+        $completedAfterRestart = Wait-ForOrderStatus -OrderId $restartedOrder.id -ExpectedStatus "Completed"
+        Write-Output "Order processing after Worker restart: $($completedAfterRestart.id) reached $($completedAfterRestart.status)"
     }
 }
 finally {

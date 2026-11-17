@@ -34,6 +34,8 @@ Thông tin đăng nhập mặc định trong Compose chỉ dùng cho môi trư�
 
 Lệnh `docker compose down` dừng và xóa các container nhưng giữ lại volume PostgreSQL. Lệnh `docker compose down -v` cũng xóa dữ liệu trong volume đó.
 
+Các container dùng chính sách `restart: unless-stopped`: Docker tự khởi động lại container nếu tiến trình bị dừng bất ngờ và khởi động lại sau khi Docker daemon chạy lại. Container đã được dừng chủ động bằng `docker compose stop` sẽ không tự chạy lại cho đến khi dùng `docker compose start`.
+
 ## Các service và luồng xử lý
 
 1. Ứng dụng khách gửi `POST /orders` đến Order API.
@@ -77,6 +79,12 @@ Có thể chạy smoke test cho API từ thư mục gốc:
 
 ```powershell
 .\tests\SmokeTest.ps1 -TestRabbitMqRecovery
+```
+
+Để kiểm tra chính sách tự khởi động container, script sẽ dừng tiến trình Worker rồi xác nhận Docker tự khởi động lại container và Worker xử lý được đơn mới:
+
+```powershell
+.\tests\SmokeTest.ps1 -TestContainerRestart
 ```
 
 Mỗi service .NET có thể chạy độc lập đều có Dockerfile riêng ở thư mục gốc: `Dockerfile.api`, `Dockerfile.worker`, `Dockerfile.notification` và `Dockerfile.client`.
