@@ -14,6 +14,8 @@ docker compose up --build
 
 Mở ứng dụng khách tại <http://localhost:5003>. Order API chạy tại <http://localhost:5000>, SignalR sử dụng đường dẫn `/orderHub` trên cổng `5002`, và RabbitMQ Management chạy tại <http://localhost:15672>.
 
+Image của Order API và Worker cài thêm `libgssapi-krb5-2` để driver PostgreSQL có thể nạp thư viện GSSAPI trong môi trường Linux.
+
 Thông tin đăng nhập mặc định trong Compose chỉ dùng cho môi trường phát triển cục bộ. Có thể thay đổi bằng biến môi trường hoặc file `.env` cục bộ:
 
 | Biến | Giá trị mặc định |
