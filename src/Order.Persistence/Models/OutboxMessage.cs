@@ -8,3 +8,9 @@ public class OutboxMessage
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? PublishedAt { get; set; }
 }
+
+public class ProcessedMessage
+{
+    public Guid Id { get; set; }
+    public DateTime ProcessedAt { get; set; } = DateTime.UtcNow;
+}

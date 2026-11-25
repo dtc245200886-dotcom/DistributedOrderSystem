@@ -13,12 +13,18 @@ public class NotificationWorker : BackgroundService
     private readonly ILogger<NotificationWorker> _logger;
     private readonly IHubContext<OrderNotificationHub> _hubContext;
     private readonly IConfiguration _configuration;
+    private readonly NotificationWorkerStatus _workerStatus;
 
-    public NotificationWorker(ILogger<NotificationWorker> logger, IHubContext<OrderNotificationHub> hubContext, IConfiguration configuration)
+    public NotificationWorker(
+        ILogger<NotificationWorker> logger,
+        IHubContext<OrderNotificationHub> hubContext,
+        IConfiguration configuration,
+        NotificationWorkerStatus workerStatus)
     {
         _logger = logger;
         _hubContext = hubContext;
         _configuration = configuration;
+        _workerStatus = workerStatus;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -33,7 +39,9 @@ public class NotificationWorker : BackgroundService
             HostName = hostName,
             Port = port,
             UserName = userName,
-            Password = password
+            Password = password,
+            AutomaticRecoveryEnabled = true,
+            NetworkRecoveryInterval = TimeSpan.FromSeconds(5)
         };
 
         IConnection? connection = null;
@@ -140,6 +148,7 @@ public class NotificationWorker : BackgroundService
                 consumer: consumer,
                 cancellationToken: stoppingToken
             );
+            _workerStatus.SetConsumer(connection, channel);
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -148,6 +157,7 @@ public class NotificationWorker : BackgroundService
         }
         finally
         {
+            _workerStatus.Clear();
             await channel.DisposeAsync();
             await connection.DisposeAsync();
         }

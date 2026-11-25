@@ -36,7 +36,9 @@ public class Worker : BackgroundService
             HostName = hostName,
             Port = port,
             UserName = userName,
-            Password = password
+            Password = password,
+            AutomaticRecoveryEnabled = true,
+            NetworkRecoveryInterval = TimeSpan.FromSeconds(5)
         };
 
         // Đảm bảo kết nối RabbitMQ thành công (có cơ chế retry nếu RabbitMQ chưa kịp khởi động)
@@ -102,7 +104,10 @@ public class Worker : BackgroundService
                     }
 
                     _logger.LogInformation("Received OrderCreatedEvent for OrderId: {OrderId}", orderEvent.OrderId);
-                    await ProcessOrderAsync(orderEvent, stoppingToken);
+                    var messageId = Guid.TryParse(ea.BasicProperties.MessageId, out var parsedMessageId)
+                        ? parsedMessageId
+                        : orderEvent.OrderId;
+                    await ProcessOrderAsync(orderEvent, messageId, stoppingToken);
 
                     // Xác nhận đã xử lý xong message (Acknowledge)
                     await channel.BasicAckAsync(ea.DeliveryTag, multiple: false);
@@ -153,10 +158,22 @@ public class Worker : BackgroundService
         }
     }
 
-    private async Task ProcessOrderAsync(OrderCreatedEvent orderEvent, CancellationToken stoppingToken)
+    private async Task ProcessOrderAsync(
+        OrderCreatedEvent orderEvent,
+        Guid messageId,
+        CancellationToken stoppingToken)
     {
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<OrderDbContext>();
+
+        if (await dbContext.ProcessedMessages.AnyAsync(message => message.Id == messageId, stoppingToken))
+        {
+            _logger.LogInformation(
+                "Ignoring duplicate order event {MessageId} for order {OrderId}.",
+                messageId,
+                orderEvent.OrderId);
+            return;
+        }
 
         var order = await dbContext.Orders
             .Include(candidate => candidate.Items)
@@ -164,12 +181,16 @@ public class Worker : BackgroundService
         if (order == null)
         {
             _logger.LogWarning("Order with ID {OrderId} not found in database.", orderEvent.OrderId);
+            dbContext.ProcessedMessages.Add(new ProcessedMessage { Id = messageId });
+            await dbContext.SaveChangesAsync(stoppingToken);
             return;
         }
 
         if (order.Status is nameof(OrderStatus.Completed) or nameof(OrderStatus.Failed))
         {
             _logger.LogInformation("Ignoring duplicate event for terminal order {OrderId} in state {Status}.", order.Id, order.Status);
+            dbContext.ProcessedMessages.Add(new ProcessedMessage { Id = messageId });
+            await dbContext.SaveChangesAsync(stoppingToken);
             return;
         }
 
@@ -186,7 +207,8 @@ public class Worker : BackgroundService
                 order,
                 OrderStatus.Failed,
                 "Đơn hàng không hợp lệ nên không thể xử lý.",
-                stoppingToken);
+                stoppingToken,
+                messageId);
             _logger.LogWarning("Order {OrderId} failed validation during processing.", order.Id);
             return;
         }
@@ -208,7 +230,8 @@ public class Worker : BackgroundService
                 order,
                 OrderStatus.Failed,
                 "Đơn hàng có trạng thái không hợp lệ nên không thể xử lý.",
-                stoppingToken);
+                stoppingToken,
+                messageId);
             _logger.LogError("Order {OrderId} had unsupported status {OldStatus} and was marked failed.", order.Id, previousStatus);
             return;
         }
@@ -222,7 +245,8 @@ public class Worker : BackgroundService
             order,
             OrderStatus.Completed,
             "Đơn hàng đã hoàn thành và sẵn sàng giao!",
-            stoppingToken);
+            stoppingToken,
+            messageId);
 
         _logger.LogInformation("Order {OrderId} successfully completed.", order.Id);
     }
@@ -232,7 +256,8 @@ public class Worker : BackgroundService
         OrderEntity order,
         OrderStatus newStatus,
         string message,
-        CancellationToken stoppingToken)
+        CancellationToken stoppingToken,
+        Guid? processedMessageId = null)
     {
         var statusEvent = new OrderStatusChangedEvent(
             order.Id,
@@ -251,6 +276,11 @@ public class Worker : BackgroundService
             EventType = OrderEventTypes.OrderStatusChanged,
             Payload = JsonSerializer.Serialize(statusEvent)
         });
+        if (processedMessageId is not null)
+        {
+            dbContext.ProcessedMessages.Add(new ProcessedMessage { Id = processedMessageId.Value });
+        }
+
         await dbContext.SaveChangesAsync(stoppingToken);
         await transaction.CommitAsync(stoppingToken);
     }

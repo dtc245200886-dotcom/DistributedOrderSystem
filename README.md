@@ -36,6 +36,8 @@ Lệnh `docker compose down` dừng và xóa các container nhưng giữ lại v
 
 Các container dùng chính sách `restart: unless-stopped`: Docker tự khởi động lại container nếu tiến trình bị dừng bất ngờ và khởi động lại sau khi Docker daemon chạy lại. Container đã được dừng chủ động bằng `docker compose stop` sẽ không tự chạy lại cho đến khi dùng `docker compose start`.
 
+API cung cấp `/health/live` và `/health/ready` (readiness kiểm tra PostgreSQL); Notification Service cung cấp `/health/live` và `/health/ready` (readiness kiểm tra consumer RabbitMQ); Client cung cấp `/health/live`. Compose dùng các endpoint này để theo dõi các ứng dụng web và kiểm tra tiến trình Worker riêng.
+
 ## Các service và luồng xử lý
 
 1. Ứng dụng khách gửi `POST /orders` đến Order API.
@@ -45,6 +47,8 @@ Các container dùng chính sách `restart: unless-stopped`: Docker tự khởi 
 5. Notification Service chuyển tiếp event trạng thái đến các client SignalR đang theo dõi đơn hàng. Giao diện client cập nhật trạng thái theo thời gian thực.
 
 Outbox giúp hệ thống có thể tiếp tục gửi event khi RabbitMQ tạm thời không hoạt động. Cơ chế gửi là **at-least-once**: nếu tiến trình dừng sau khi RabbitMQ xác nhận event nhưng trước khi outbox được đánh dấu đã gửi, event có thể được gửi lặp lại. Vì vậy, consumer nên xử lý được trường hợp nhận event trùng.
+
+Worker lưu ID message đã xử lý trong PostgreSQL cùng transaction cập nhật trạng thái cuối và outbox, để bỏ qua message đơn hàng được giao lại. RabbitMQ automatic recovery được bật cho các service; API outbox và các consumer cũng thử kết nối lại khi broker tạm thời không sẵn sàng. Các service .NET xuất log dạng JSON ra console.
 
 Hiện tại, `Failed` được dùng khi dữ liệu đơn đã lưu không hợp lệ hoặc trạng thái lưu không được hỗ trợ. API từ chối request không hợp lệ ngay từ đầu, vì vậy các đơn tạo bình thường sẽ theo luồng thành công trừ khi bổ sung quy tắc thất bại nghiệp vụ.
 

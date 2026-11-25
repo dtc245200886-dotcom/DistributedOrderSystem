@@ -1,10 +1,14 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Order.API.Services;
+using Order.API.Health;
 using Order.Persistence.Data;
 using Order.Persistence.Models;
 using OrderSystem.Shared;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Logging.ClearProviders();
+builder.Logging.AddJsonConsole();
 
 // Add services to the container
 builder.Services.AddDbContext<OrderDbContext>(options =>
@@ -20,6 +24,8 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddHostedService<OutboxPublisher>();
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>("postgres", tags: ["ready"]);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -33,6 +39,14 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = _ => false
+}).WithTags("health");
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready")
+}).WithTags("health");
 
 // Ensure the initial schema exists and add the outbox table to existing databases.
 using (var scope = app.Services.CreateScope())
@@ -49,6 +63,10 @@ using (var scope = app.Services.CreateScope())
         );
         CREATE INDEX IF NOT EXISTS "IX_OutboxMessages_PublishedAt_CreatedAt"
             ON "OutboxMessages" ("PublishedAt", "CreatedAt");
+        CREATE TABLE IF NOT EXISTS "ProcessedMessages" (
+            "Id" uuid PRIMARY KEY,
+            "ProcessedAt" timestamp with time zone NOT NULL
+        );
         """);
 }
 

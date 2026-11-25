@@ -65,6 +65,12 @@ services:
         condition: service_healthy
     networks:
       - order-net
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   # 4. Order Worker
   order-worker:
@@ -85,6 +91,12 @@ services:
         condition: service_healthy
     networks:
       - order-net
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'Order.Worker.dll' /proc/1/cmdline"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   # 5. Notification Service
   notification-service:
@@ -107,6 +119,12 @@ services:
         condition: service_healthy
     networks:
       - order-net
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   # 6. Order Client Web App
   order-client:
@@ -122,9 +140,16 @@ services:
     ports:
       - "${ORDER_CLIENT_PORT:-5003}:8080"
     depends_on:
-      - order-api
+      order-api:
+        condition: service_healthy
     networks:
       - order-net
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   pgdata:

@@ -1,5 +1,7 @@
 param(
     [string]$ApiUrl = "http://localhost:5000",
+    [string]$NotificationUrl = "http://localhost:5002",
+    [string]$ClientUrl = "http://localhost:5003",
     [switch]$TestRabbitMqRecovery,
     [switch]$TestContainerRestart
 )
@@ -82,7 +84,64 @@ function Wait-ForOrderStatus {
     throw "Order $OrderId did not reach '$ExpectedStatus' within $TimeoutSeconds seconds."
 }
 
+function Assert-HealthEndpoint {
+    param(
+        [string]$BaseUrl,
+        [string]$Path
+    )
+
+    $request = [System.Net.Http.HttpRequestMessage]::new(
+        [System.Net.Http.HttpMethod]::Get,
+        "$BaseUrl$Path")
+    $response = $httpClient.SendAsync($request).GetAwaiter().GetResult()
+    if ([int]$response.StatusCode -ne 200) {
+        $details = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        throw "Expected $BaseUrl$Path to return HTTP 200, got $([int]$response.StatusCode): $details"
+    }
+
+    $response.Dispose()
+    $request.Dispose()
+}
+
+function Wait-ForHealthStatus {
+    param(
+        [string]$BaseUrl,
+        [string]$Path,
+        [int]$ExpectedStatusCode,
+        [int]$TimeoutSeconds = 60
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        $request = [System.Net.Http.HttpRequestMessage]::new(
+            [System.Net.Http.HttpMethod]::Get,
+            "$BaseUrl$Path")
+        try {
+            $response = $httpClient.SendAsync($request).GetAwaiter().GetResult()
+            $statusCode = [int]$response.StatusCode
+            $response.Dispose()
+        }
+        finally {
+            $request.Dispose()
+        }
+
+        if ($statusCode -eq $ExpectedStatusCode) {
+            return
+        }
+
+        Start-Sleep -Seconds 1
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    throw "Expected $BaseUrl$Path to return HTTP $ExpectedStatusCode within $TimeoutSeconds seconds, got $statusCode."
+}
+
 try {
+    Assert-HealthEndpoint -BaseUrl $ApiUrl -Path "/health/live"
+    Assert-HealthEndpoint -BaseUrl $ApiUrl -Path "/health/ready"
+    Assert-HealthEndpoint -BaseUrl $NotificationUrl -Path "/health/ready"
+    Assert-HealthEndpoint -BaseUrl $ClientUrl -Path "/health/live"
+    Write-Output "Service health checks: passed"
+
     $invalidBody = @{
         customerName = "Invalid Smoke Test"
         items = @(@{
@@ -138,6 +197,10 @@ try {
         }
 
         try {
+            Wait-ForHealthStatus -BaseUrl $NotificationUrl -Path "/health/ready" -ExpectedStatusCode 503
+            Assert-HealthEndpoint -BaseUrl $ApiUrl -Path "/health/ready"
+            Write-Output "Health status during RabbitMQ outage: passed"
+
             $pendingOrder = New-TestOrder
             Start-Sleep -Seconds 2
             $response = Send-JsonRequest -Method "GET" -Path "/orders/$($pendingOrder.id)"
@@ -153,6 +216,9 @@ try {
                 throw "Could not restart the RabbitMQ Compose service."
             }
         }
+
+        Wait-ForHealthStatus -BaseUrl $NotificationUrl -Path "/health/ready" -ExpectedStatusCode 200
+        Write-Output "Notification readiness after RabbitMQ recovery: passed"
 
         $recoveredOrder = Wait-ForOrderStatus -OrderId $pendingOrder.id -ExpectedStatus "Completed"
         Write-Output "Outbox recovery: $($recoveredOrder.id) reached $($recoveredOrder.status)"
